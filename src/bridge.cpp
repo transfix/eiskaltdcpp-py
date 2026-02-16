@@ -13,6 +13,7 @@
 #include "bridge.h"
 #include "bridge_listeners.h"
 #include "callbacks.h"
+#include "dcpp_compat.h"  // must precede dcpp headers (provides STL + using decls)
 
 #include <dcpp/DCPlusPlus.h>
 #include <dcpp/Util.h>
@@ -34,7 +35,12 @@
 #include <dcpp/Transfer.h>
 #include <dcpp/UploadManager.h>
 #include <dcpp/DirectoryListing.h>
-#include <dcpp/version.h>
+
+// dcpp/version.h pulls in VersionGlobal.h which is a build-time generated
+// file not installed by libeiskaltdcpp-dev.  We only need DCVERSIONSTRING.
+#ifndef DCVERSIONSTRING
+#define DCVERSIONSTRING "2.4.2"
+#endif
 
 #include <algorithm>
 #include <filesystem>
@@ -98,28 +104,20 @@ bool DCBridge::initialize(const std::string& configDir) {
         return false;
     }
 
-    // Initialize dcpp paths
-    Util::initialize(cfgDir);
+    // Initialize dcpp paths — must be called before dcpp::startup() which
+    // internally calls Util::initialize() again, but the static guard in
+    // initialize() means our overrides take precedence.
+    Util::PathsMap pathOverrides;
+    pathOverrides[Util::PATH_USER_CONFIG] = cfgDir;
+    pathOverrides[Util::PATH_USER_LOCAL] = cfgDir;
+    Util::initialize(pathOverrides);
 
-    // Start the core library — creates all singleton managers
+    // Start the core library — creates all singleton managers, loads
+    // settings, favorites, certificates, hashing, share refresh, and queue.
     dcpp::startup(startupCallback, nullptr);
 
-    // Load configuration
-    SettingsManager::getInstance()->load();
-    FavoriteManager::getInstance()->load();
-    CryptoManager::getInstance()->loadCertificates();
-
-    // Start the timer (drives periodic events)
+    // Start the timer (drives periodic events) — not done by startup()
     TimerManager::getInstance()->start();
-
-    // Start file hashing
-    HashManager::getInstance()->startup();
-
-    // Refresh shared directories
-    ShareManager::getInstance()->refresh(true, false, true);
-
-    // Load download queue
-    QueueManager::getInstance()->loadQueue();
 
     // Subscribe listeners to global managers
     BridgeListeners::getInstance().setBridge(this);
@@ -274,12 +272,11 @@ void DCBridge::sendPM(const std::string& hubUrl,
     auto* client = findClient(hubUrl);
     if (!client) return;
 
-    // Find the online user on this hub
-    auto lock2 = ClientManager::getInstance()->lock();
-    auto ou = ClientManager::getInstance()->findOnlineUser(
-        CID(), nick, client->getHubUrl());
-    if (ou) {
-        client->privateMessage(*ou, message, false);
+    // Find the user via CID lookup
+    UserPtr user = ClientManager::getInstance()->findUser(nick, hubUrl);
+    if (user) {
+        HintedUser hu(user, hubUrl);
+        ClientManager::getInstance()->privateMessage(hu, message, false);
     }
 }
 
@@ -314,24 +311,10 @@ std::vector<UserInfo> DCBridge::getHubUsers(const std::string& hubUrl) {
     auto* client = findClient(hubUrl);
     if (!client) return result;
 
-    // For NMDC hubs, iterate online users
-    auto lock2 = ClientManager::getInstance()->lock();
-    auto& onlineUsers = ClientManager::getInstance()->getOnlineUsers();
-    for (auto& [cid, ou] : onlineUsers) {
-        if (ou->getClient().getHubUrl() == hubUrl) {
-            UserInfo ui;
-            auto& id = ou->getIdentity();
-            ui.nick = id.getNick();
-            ui.description = id.getDescription();
-            ui.connection = id.getConnection();
-            ui.email = id.getEmail();
-            ui.shareSize = Util::toInt64(id.get("SS"));
-            ui.isOp = id.isOp();
-            ui.isBot = id.isBot();
-            ui.cid = cid.toBase32();
-            result.push_back(std::move(ui));
-        }
-    }
+    // TODO: The dcpp core stores users per-hub inside NmdcHub/AdcHub
+    // private maps, with no public iteration API.  The correct long-term
+    // approach is to maintain a local user map via UserUpdated/UserRemoved
+    // callbacks.  For now, return the user count via HubInfo instead.
     return result;
 }
 
@@ -345,22 +328,17 @@ UserInfo DCBridge::getUserInfo(const std::string& nick,
     auto* client = findClient(hubUrl);
     if (!client) return ui;
 
-    auto lock2 = ClientManager::getInstance()->lock();
-    auto& onlineUsers = ClientManager::getInstance()->getOnlineUsers();
-    for (auto& [cid, ou] : onlineUsers) {
-        if (ou->getClient().getHubUrl() == hubUrl) {
-            auto& id = ou->getIdentity();
-            if (id.getNick() == nick) {
-                ui.description = id.getDescription();
-                ui.connection = id.getConnection();
-                ui.email = id.getEmail();
-                ui.shareSize = Util::toInt64(id.get("SS"));
-                ui.isOp = id.isOp();
-                ui.isBot = id.isBot();
-                ui.cid = cid.toBase32();
-                break;
-            }
-        }
+    // Look up user via CID-based find, then get their identity
+    UserPtr user = ClientManager::getInstance()->findUser(nick, hubUrl);
+    if (user) {
+        Identity id = ClientManager::getInstance()->getOnlineUserIdentity(user);
+        ui.description = id.getDescription();
+        ui.connection = id.getConnection();
+        ui.email = id.getEmail();
+        ui.shareSize = id.getBytesShared();
+        ui.isOp = id.isOp();
+        ui.isBot = id.isBot();
+        ui.cid = user->getCID().toBase32();
     }
     return ui;
 }
@@ -454,7 +432,7 @@ bool DCBridge::addToQueue(const std::string& directory,
 
         QueueManager::getInstance()->add(target, size,
             TTHValue(tth), HintedUser(),
-            QueueItem::FLAG_RESUME);
+            QueueItem::FLAG_NORMAL);
         return true;
     } catch (const Exception& e) {
         return false;
@@ -527,13 +505,9 @@ std::vector<QueueItemInfo> DCBridge::listQueue() {
     std::vector<QueueItemInfo> result;
     if (!m_initialized.load()) return result;
 
-    auto* qm = QueueManager::getInstance();
-    auto lock2 = qm->lockQueue();
-
-    auto& queue = qm->lockQueue();
-    // TODO: iterate queue items when API is confirmed
-    // This matches the daemon's listQueue() pattern
-
+    // TODO: implement queue listing when QueueManager public API is confirmed.
+    // The QueueManager::lockQueue()/unlockQueue() pattern requires careful
+    // manual lock management. For now, return empty.
     return result;
 }
 
@@ -567,20 +541,16 @@ bool DCBridge::requestFileList(const std::string& hubUrl,
     if (!client) return false;
 
     // Find user and request file list
-    auto lock2 = ClientManager::getInstance()->lock();
-    auto& onlineUsers = ClientManager::getInstance()->getOnlineUsers();
-    for (auto& [cid, ou] : onlineUsers) {
-        if (ou->getClient().getHubUrl() == hubUrl &&
-            ou->getIdentity().getNick() == nick) {
-            try {
-                QueueManager::getInstance()->addList(
-                    HintedUser(ou->getUser(), hubUrl),
-                    matchQueue ? QueueItem::FLAG_MATCH_QUEUE : 0,
-                    "");
-                return true;
-            } catch (const Exception&) {
-                return false;
-            }
+    UserPtr user = ClientManager::getInstance()->findUser(nick, hubUrl);
+    if (user) {
+        try {
+            QueueManager::getInstance()->addList(
+                HintedUser(user, hubUrl),
+                matchQueue ? QueueItem::FLAG_MATCH_QUEUE : 0,
+                "");
+            return true;
+        } catch (const Exception&) {
+            return false;
         }
     }
     return false;

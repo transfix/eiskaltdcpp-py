@@ -15,6 +15,7 @@
 
 #include "callbacks.h"
 #include "types.h"
+#include "dcpp_compat.h"  // must precede dcpp headers
 
 #include <dcpp/Client.h>
 #include <dcpp/ClientListener.h>
@@ -70,27 +71,32 @@ inline UserInfo userFromOnlineUser(const dcpp::OnlineUser& ou) {
 
 inline SearchResultInfo infoFromSearchResult(const dcpp::SearchResultPtr& sr) {
     SearchResultInfo sri;
-    sri.fileName = sr->getFileName();
-    sri.filePath = sr->getFile();
-    sri.fileSize = sr->getSize();
+    sri.file = sr->getBaseName();
+    sri.size = sr->getSize();
     sri.freeSlots = sr->getFreeSlots();
     sri.totalSlots = sr->getSlots();
     sri.tth = sr->getTTH().toBase32();
     sri.hubUrl = sr->getHubURL();
-    sri.nick = sr->getUser()->getFirstNick();
+    sri.hubName = sr->getHubName();
+    {
+        auto nicks = dcpp::ClientManager::getInstance()->getNicks(
+            sr->getUser()->getCID(), sr->getHubURL());
+        sri.nick = nicks.empty() ? "" : nicks[0];
+    }
     sri.isDirectory = (sr->getType() == dcpp::SearchResult::TYPE_DIRECTORY);
     return sri;
 }
 
 inline TransferInfo infoFromDownload(const dcpp::Download* dl) {
     TransferInfo ti;
-    ti.target = dl->getPath();
+    ti.filename = dl->getPath();
     ti.size = dl->getSize();
-    ti.transferred = dl->getPos();
+    ti.pos = dl->getPos();
     ti.speed = static_cast<int64_t>(dl->getAverageSpeed());
     ti.isDownload = true;
     if (dl->getHintedUser().user) {
-        ti.nick = dl->getHintedUser().user->getFirstNick();
+        auto nicks = dcpp::ClientManager::getInstance()->getNicks(dl->getHintedUser());
+        ti.nick = nicks.empty() ? "" : nicks[0];
         ti.hubUrl = dl->getHintedUser().hint;
     }
     return ti;
@@ -98,13 +104,14 @@ inline TransferInfo infoFromDownload(const dcpp::Download* dl) {
 
 inline TransferInfo infoFromUpload(const dcpp::Upload* ul) {
     TransferInfo ti;
-    ti.target = ul->getPath();
+    ti.filename = ul->getPath();
     ti.size = ul->getSize();
-    ti.transferred = ul->getPos();
+    ti.pos = ul->getPos();
     ti.speed = static_cast<int64_t>(ul->getAverageSpeed());
     ti.isDownload = false;
     if (ul->getHintedUser().user) {
-        ti.nick = ul->getHintedUser().user->getFirstNick();
+        auto nicks = dcpp::ClientManager::getInstance()->getNicks(ul->getHintedUser());
+        ti.nick = nicks.empty() ? "" : nicks[0];
         ti.hubUrl = ul->getHintedUser().hint;
     }
     return ti;
@@ -198,7 +205,7 @@ public:
 
     void on(dcpp::ClientListener::GetPassword, dcpp::Client* c) noexcept override {
         auto cb = getCallback();
-        if (cb) cb->onHubGetPassword(c->getHubUrl());
+        if (cb) cb->onHubPasswordRequest(c->getHubUrl());
     }
 
     void on(dcpp::ClientListener::HubUpdated, dcpp::Client* c) noexcept override {
@@ -208,7 +215,7 @@ public:
 
     void on(dcpp::ClientListener::NickTaken, dcpp::Client* c) noexcept override {
         auto cb = getCallback();
-        if (cb) cb->onHubNickTaken(c->getHubUrl());
+        if (cb) cb->onNickTaken(c->getHubUrl());
     }
 
     void on(dcpp::ClientListener::HubFull, dcpp::Client* c) noexcept override {
@@ -221,7 +228,6 @@ public:
         std::string hubUrl = c->getHubUrl();
         std::string nick;
         std::string text = msg.text;
-        bool isPrivate = false;
 
         if (msg.from) {
             nick = msg.from->getIdentity().getNick();
@@ -235,10 +241,10 @@ public:
 
         // Determine if it was private or public
         if (msg.to && msg.to->getIdentity().getNick().size() > 0) {
-            isPrivate = true;
-            cb->onPrivateMessage(hubUrl, nick, text);
+            std::string toNick = msg.to->getIdentity().getNick();
+            cb->onPrivateMessage(hubUrl, nick, toNick, text);
         } else {
-            cb->onChatMessage(hubUrl, nick, text);
+            cb->onChatMessage(hubUrl, nick, text, msg.thirdPerson);
         }
     }
 
@@ -251,7 +257,7 @@ public:
     void on(dcpp::ClientListener::UserUpdated, dcpp::Client* c,
             const dcpp::OnlineUser& ou) noexcept override {
         auto cb = getCallback();
-        if (cb) cb->onUserConnected(c->getHubUrl(), userFromOnlineUser(ou));
+        if (cb) cb->onUserConnected(c->getHubUrl(), ou.getIdentity().getNick());
     }
 
     void on(dcpp::ClientListener::UsersUpdated, dcpp::Client* c,
@@ -259,14 +265,14 @@ public:
         auto cb = getCallback();
         if (!cb) return;
         for (auto& ou : list) {
-            cb->onUserUpdated(c->getHubUrl(), userFromOnlineUser(*ou));
+            cb->onUserUpdated(c->getHubUrl(), ou->getIdentity().getNick());
         }
     }
 
     void on(dcpp::ClientListener::UserRemoved, dcpp::Client* c,
             const dcpp::OnlineUser& ou) noexcept override {
         auto cb = getCallback();
-        if (cb) cb->onUserDisconnected(c->getHubUrl(), userFromOnlineUser(ou));
+        if (cb) cb->onUserDisconnected(c->getHubUrl(), ou.getIdentity().getNick());
     }
 
     void on(dcpp::ClientListener::SearchFlood, dcpp::Client* c,
@@ -288,7 +294,9 @@ public:
         stashSearchResult(info);
 
         auto cb = getCallback();
-        if (cb) cb->onSearchResult(info);
+        if (cb) cb->onSearchResult(info.hubUrl, info.file, info.size,
+                                    info.freeSlots, info.totalSlots,
+                                    info.tth, info.nick, info.isDirectory);
     }
 
     // =================================================================
@@ -299,13 +307,8 @@ public:
             dcpp::QueueItem* qi) noexcept override {
         auto cb = getCallback();
         if (cb) {
-            QueueItemInfo info;
-            info.target = qi->getTarget();
-            info.size = qi->getSize();
-            info.downloadedBytes = qi->getDownloadedBytes();
-            info.priority = static_cast<int>(qi->getPriority());
-            info.tth = qi->getTTH().toBase32();
-            cb->onQueueItemAdded(info);
+            cb->onQueueItemAdded(qi->getTarget(), qi->getSize(),
+                                 qi->getTTH().toBase32());
         }
     }
 
@@ -314,13 +317,7 @@ public:
             const std::string& dir, int64_t speed) noexcept override {
         auto cb = getCallback();
         if (cb) {
-            QueueItemInfo info;
-            info.target = qi->getTarget();
-            info.size = qi->getSize();
-            info.downloadedBytes = qi->getSize();
-            info.priority = static_cast<int>(qi->getPriority());
-            info.tth = qi->getTTH().toBase32();
-            cb->onQueueItemFinished(info);
+            cb->onQueueItemFinished(qi->getTarget(), qi->getSize());
         }
     }
 
@@ -336,16 +333,11 @@ public:
     void on(dcpp::QueueManagerListener::Moved,
             dcpp::QueueItem* qi,
             const std::string& oldTarget) noexcept override {
-        // Item was moved to a new target path
+        // Item was moved to a new target path — report as new queue addition
         auto cb = getCallback();
         if (cb) {
-            QueueItemInfo info;
-            info.target = qi->getTarget();
-            info.size = qi->getSize();
-            info.downloadedBytes = qi->getDownloadedBytes();
-            info.priority = static_cast<int>(qi->getPriority());
-            info.tth = qi->getTTH().toBase32();
-            cb->onQueueItemAdded(info);  // report as updated
+            cb->onQueueItemAdded(qi->getTarget(), qi->getSize(),
+                                 qi->getTTH().toBase32());
         }
     }
 
@@ -356,20 +348,29 @@ public:
     void on(dcpp::DownloadManagerListener::Starting,
             dcpp::Download* dl) noexcept override {
         auto cb = getCallback();
-        if (cb) cb->onDownloadStarting(infoFromDownload(dl));
+        if (cb) {
+            auto ti = infoFromDownload(dl);
+            cb->onDownloadStarting(ti.filename, ti.nick, ti.size);
+        }
     }
 
     void on(dcpp::DownloadManagerListener::Complete,
             dcpp::Download* dl) noexcept override {
         auto cb = getCallback();
-        if (cb) cb->onDownloadComplete(infoFromDownload(dl));
+        if (cb) {
+            auto ti = infoFromDownload(dl);
+            cb->onDownloadComplete(ti.filename, ti.nick, ti.size, ti.speed);
+        }
     }
 
     void on(dcpp::DownloadManagerListener::Failed,
             dcpp::Download* dl,
             const std::string& reason) noexcept override {
         auto cb = getCallback();
-        if (cb) cb->onDownloadFailed(infoFromDownload(dl), reason);
+        if (cb) {
+            auto ti = infoFromDownload(dl);
+            cb->onDownloadFailed(ti.filename, reason);
+        }
     }
 
     void on(dcpp::DownloadManagerListener::Tick,
@@ -384,13 +385,19 @@ public:
     void on(dcpp::UploadManagerListener::Starting,
             dcpp::Upload* ul) noexcept override {
         auto cb = getCallback();
-        if (cb) cb->onUploadStarting(infoFromUpload(ul));
+        if (cb) {
+            auto ti = infoFromUpload(ul);
+            cb->onUploadStarting(ti.filename, ti.nick, ti.size);
+        }
     }
 
     void on(dcpp::UploadManagerListener::Complete,
             dcpp::Upload* ul) noexcept override {
         auto cb = getCallback();
-        if (cb) cb->onUploadComplete(infoFromUpload(ul));
+        if (cb) {
+            auto ti = infoFromUpload(ul);
+            cb->onUploadComplete(ti.filename, ti.nick, ti.size);
+        }
     }
 
     void on(dcpp::UploadManagerListener::Failed,
