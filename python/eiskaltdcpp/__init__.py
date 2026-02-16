@@ -16,7 +16,8 @@ except ImportError:
 # Import high-level wrapper when SWIG module is available
 try:
     from eiskaltdcpp.dc_client import DCClient
-    __all__ = ["DCClient", "__version__"]
+    from eiskaltdcpp.async_client import AsyncDCClient
+    __all__ = ["DCClient", "AsyncDCClient", "__version__"]
 except ImportError:
     # SWIG module not yet built — only version available
     __all__ = ["__version__"]

@@ -462,3 +462,83 @@ class TestDCClientWrapper:
 
         # Both registered without error
         assert len(results) == 0
+
+
+# ============================================================================
+# AsyncDCClient wrapper tests
+# ============================================================================
+
+class TestAsyncDCClient:
+    """Tests for the AsyncDCClient async wrapper."""
+
+    def test_import_async_client(self):
+        """AsyncDCClient can be imported."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        assert AsyncDCClient is not None
+
+    def test_async_client_construct(self, unique_config_dir):
+        """AsyncDCClient can be constructed without initializing."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+        assert not client.is_initialized
+
+    def test_async_client_repr(self, unique_config_dir):
+        """AsyncDCClient has a useful repr."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+        r = repr(client)
+        assert "AsyncDCClient" in r
+        assert "not initialized" in r
+
+    def test_async_client_event_registration(self, unique_config_dir):
+        """Async client event registration works."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+
+        @client.on("chat_message")
+        async def handler(hub, nick, msg, third):
+            pass
+
+        # Registered without error
+        assert len(client._handlers["chat_message"]) == 1
+
+    def test_async_client_invalid_event(self, unique_config_dir):
+        """Registering an invalid event raises ValueError."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+
+        with pytest.raises(ValueError):
+            client.on("bogus_event", lambda: None)
+
+    def test_async_client_off(self, unique_config_dir):
+        """client.off() unregisters a handler."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+
+        async def handler(hub, nick, msg, third):
+            pass
+
+        client.on("chat_message", handler)
+        assert len(client._handlers["chat_message"]) == 1
+        client.off("chat_message", handler)
+        assert len(client._handlers["chat_message"]) == 0
+
+    def test_async_client_version(self, unique_config_dir):
+        """Async client exposes version."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+        v = client.version
+        assert v and len(v) > 0
+
+    def test_async_client_from_package_init(self):
+        """AsyncDCClient is importable from the package."""
+        from eiskaltdcpp import AsyncDCClient
+        assert AsyncDCClient is not None
+
+    def test_event_stream_class(self, unique_config_dir):
+        """EventStream can be created."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+        stream = client.events()
+        assert stream is not None
+

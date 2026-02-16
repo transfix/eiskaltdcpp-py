@@ -57,7 +57,7 @@ else()
     set_target_properties(dc_core PROPERTIES SUFFIX ".so")
 endif()
 
-# Ensure the output directory and __init__.py exist
+# Ensure the output directory and Python source files exist in build tree
 add_custom_command(TARGET dc_core POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory
         ${CMAKE_BINARY_DIR}/python/eiskaltdcpp
@@ -67,6 +67,9 @@ add_custom_command(TARGET dc_core POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/dc_client.py
         ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/dc_client.py
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/async_client.py
+        ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/async_client.py
     COMMENT "SWIG Python module built: dc_core"
 )
 
