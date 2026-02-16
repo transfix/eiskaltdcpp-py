@@ -178,13 +178,13 @@ class TestDataTypes:
     def test_search_result_fields(self):
         """SearchResultInfo has expected fields."""
         info = dc_core.SearchResultInfo()
-        assert hasattr(info, "fileName")
-        assert hasattr(info, "filePath")
-        assert hasattr(info, "fileSize")
+        assert hasattr(info, "file")
+        assert hasattr(info, "size")
         assert hasattr(info, "freeSlots")
         assert hasattr(info, "totalSlots")
         assert hasattr(info, "tth")
         assert hasattr(info, "hubUrl")
+        assert hasattr(info, "hubName")
         assert hasattr(info, "nick")
         assert hasattr(info, "isDirectory")
 
@@ -242,7 +242,7 @@ class TestEventCallback:
                 super().__init__()
                 self.messages: List[str] = []
 
-            def onChatMessage(self, hubUrl, nick, message):
+            def onChatMessage(self, hubUrl, nick, message, thirdPerson):
                 self.messages.append(f"<{nick}> {message}")
 
         cb = MyCallback()
@@ -261,16 +261,17 @@ class TestEventCallback:
             def onHubDisconnected(self, hubUrl, reason):
                 self.events.append(f"disconnected:{hubUrl}")
 
-            def onChatMessage(self, hubUrl, nick, message):
+            def onChatMessage(self, hubUrl, nick, message, thirdPerson):
                 self.events.append(f"chat:{nick}:{message}")
 
-            def onSearchResult(self, result):
+            def onSearchResult(self, hubUrl, file, size, freeSlots,
+                               totalSlots, tth, nick, isDirectory):
                 self.events.append("search_result")
 
         cb = TestCallback()
         cb.onHubConnected("dchub://test:411", "TestHub")
         cb.onHubDisconnected("dchub://test:411", "bye")
-        cb.onChatMessage("dchub://test:411", "user", "hello")
+        cb.onChatMessage("dchub://test:411", "user", "hello", False)
 
         assert "connected:dchub://test:411" in cb.events
         assert "disconnected:dchub://test:411" in cb.events
@@ -280,8 +281,8 @@ class TestEventCallback:
         """All callback methods can be overridden."""
         callback_methods = [
             "onHubConnecting", "onHubConnected", "onHubDisconnected",
-            "onHubRedirect", "onHubGetPassword", "onHubUpdated",
-            "onHubNickTaken", "onHubFull",
+            "onHubRedirect", "onHubPasswordRequest", "onHubUpdated",
+            "onNickTaken", "onHubFull",
             "onChatMessage", "onPrivateMessage", "onStatusMessage",
             "onUserConnected", "onUserDisconnected", "onUserUpdated",
             "onSearchResult",
@@ -310,7 +311,7 @@ class TestThreadSafety:
                 self.lock = threading.Lock()
                 self.counter = 0
 
-            def onChatMessage(self, hubUrl, nick, message):
+            def onChatMessage(self, hubUrl, nick, message, thirdPerson):
                 with self.lock:
                     self.counter += 1
 
@@ -319,7 +320,7 @@ class TestThreadSafety:
 
         def call_chat(n):
             for _ in range(100):
-                cb.onChatMessage("hub", f"user{n}", "msg")
+                cb.onChatMessage("hub", f"user{n}", "msg", False)
 
         for i in range(4):
             t = threading.Thread(target=call_chat, args=(i,))

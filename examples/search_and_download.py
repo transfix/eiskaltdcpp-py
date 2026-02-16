@@ -74,33 +74,34 @@ def main() -> None:
     result_count = {"n": 0}
 
     @client.on("search_result")
-    def on_result(result) -> None:
+    def on_result(hub_url, file, size, freeSlots, totalSlots, tth, nick,
+                  isDirectory) -> None:
         result_count["n"] += 1
-        kind = "DIR" if result.isDirectory else "FILE"
-        print(f"  [{result_count['n']:3d}] {kind}  {result.fileName}  "
-              f"{format_size(result.fileSize)}  "
-              f"slots:{result.freeSlots}/{result.totalSlots}  "
-              f"from:{result.nick}")
+        kind = "DIR" if isDirectory else "FILE"
+        print(f"  [{result_count['n']:3d}] {kind}  {file}  "
+              f"{format_size(size)}  "
+              f"slots:{freeSlots}/{totalSlots}  "
+              f"from:{nick}")
 
     @client.on("queue_item_added")
-    def on_queued(item) -> None:
-        print(f"[Q+] Queued: {item.target} ({format_size(item.size)})")
+    def on_queued(target, size, tth) -> None:
+        print(f"[Q+] Queued: {target} ({format_size(size)})")
 
     @client.on("queue_item_finished")
-    def on_finished(item) -> None:
-        print(f"[OK] Download complete: {item.target}")
+    def on_finished(target, size) -> None:
+        print(f"[OK] Download complete: {target}")
 
     @client.on("download_starting")
-    def on_dl_start(transfer) -> None:
-        print(f"[DL] Starting: {transfer.target} from {transfer.nick}")
+    def on_dl_start(target, nick, size) -> None:
+        print(f"[DL] Starting: {target} from {nick}")
 
     @client.on("download_complete")
-    def on_dl_done(transfer) -> None:
-        print(f"[DL] Complete: {transfer.target}")
+    def on_dl_done(target, nick, size, speed) -> None:
+        print(f"[DL] Complete: {target}")
 
     @client.on("download_failed")
-    def on_dl_fail(transfer, reason: str) -> None:
-        print(f"[!!] Failed: {transfer.target} — {reason}")
+    def on_dl_fail(target, reason: str) -> None:
+        print(f"[!!] Failed: {target} — {reason}")
 
     # ─── Connect and wait ───
 
@@ -151,8 +152,8 @@ def main() -> None:
     displayed = results[:args.max_results]
     for i, r in enumerate(displayed, 1):
         kind = "DIR " if r.isDirectory else "FILE"
-        print(f"  {i:3d}. [{kind}] {r.fileName}")
-        print(f"       Size: {format_size(r.fileSize)}  "
+        print(f"  {i:3d}. [{kind}] {r.file}")
+        print(f"       Size: {format_size(r.size)}  "
               f"Slots: {r.freeSlots}/{r.totalSlots}  "
               f"From: {r.nick}")
         print(f"       TTH:  {r.tth}")
@@ -166,8 +167,8 @@ def main() -> None:
     if args.auto_download:
         r = displayed[0]
         if not r.isDirectory:
-            print(f"Auto-downloading: {r.fileName}...")
-            ok = client.download(args.download_dir, r.fileName, r.fileSize, r.tth)
+            print(f"Auto-downloading: {r.file}...")
+            ok = client.download(args.download_dir, r.file, r.size, r.tth)
             if ok:
                 print(f"Added to queue. Downloading to {args.download_dir}/")
                 # Wait a bit for transfer to start
@@ -198,10 +199,10 @@ def main() -> None:
                 if 0 <= idx < len(displayed):
                     r = displayed[idx]
                     ok = client.download(
-                        args.download_dir, r.fileName, r.fileSize, r.tth
+                        args.download_dir, r.file, r.size, r.tth
                     )
                     if ok:
-                        print(f"Added to queue: {r.fileName}")
+                        print(f"Added to queue: {r.file}")
                         print("Waiting for transfer... (Ctrl+C to quit)")
 
                         # Wait for download, showing progress

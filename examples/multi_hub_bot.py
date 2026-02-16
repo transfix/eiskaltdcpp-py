@@ -112,10 +112,12 @@ class HubBot:
             self.client.connect(new_url)
 
         @self.client.on("chat_message")
-        def on_chat(hub_url: str, nick: str, message: str) -> None:
+        def on_chat(hub_url: str, nick: str, message: str,
+                    third_person: bool = False) -> None:
             ts = time.strftime("%H:%M:%S")
             hub_short = hub_url.split("://")[-1].split(":")[0]
-            print(f"  {ts} [{hub_short}] <{nick}> {message}")
+            prefix = "* " if third_person else ""
+            print(f"  {ts} [{hub_short}] <{nick}> {prefix}{message}")
 
             # Check for bot commands
             msg = message.strip()
@@ -123,22 +125,23 @@ class HubBot:
                 self._handle_command(hub_url, nick, msg)
 
         @self.client.on("private_message")
-        def on_pm(hub_url: str, nick: str, message: str) -> None:
+        def on_pm(hub_url: str, from_nick: str, to_nick: str,
+                  message: str) -> None:
             ts = time.strftime("%H:%M:%S")
-            print(f"  {ts} [PM from {nick}] {message}")
+            print(f"  {ts} [PM from {from_nick}] {message}")
 
             # Respond to PM commands too
             msg = message.strip()
             if msg.startswith("!"):
-                self._handle_command(hub_url, nick, msg, private=True)
+                self._handle_command(hub_url, from_nick, msg, private=True)
 
         @self.client.on("user_connected")
-        def on_user_join(hub_url: str, user) -> None:
+        def on_user_join(hub_url: str, nick: str) -> None:
             with self._lock:
                 self._user_counts[hub_url] = self._user_counts.get(hub_url, 0) + 1
 
         @self.client.on("user_disconnected")
-        def on_user_part(hub_url: str, user) -> None:
+        def on_user_part(hub_url: str, nick: str) -> None:
             with self._lock:
                 self._user_counts[hub_url] = max(
                     0, self._user_counts.get(hub_url, 1) - 1

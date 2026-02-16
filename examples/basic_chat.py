@@ -79,24 +79,27 @@ def main() -> None:
         print(f"[?] Hub {hub_url} requires a password (set via config)")
 
     @client.on("chat_message")
-    def on_chat(hub_url: str, nick: str, message: str) -> None:
-        print(f"<{nick}> {message}")
+    def on_chat(hub_url: str, nick: str, message: str, third_person: bool = False) -> None:
+        if third_person:
+            print(f"* {nick} {message}")
+        else:
+            print(f"<{nick}> {message}")
 
     @client.on("private_message")
-    def on_pm(hub_url: str, nick: str, message: str) -> None:
-        print(f"[PM from {nick}] {message}")
+    def on_pm(hub_url: str, from_nick: str, to_nick: str, message: str) -> None:
+        print(f"[PM from {from_nick}] {message}")
 
     @client.on("status_message")
     def on_status(hub_url: str, message: str) -> None:
         print(f"*** {message}")
 
     @client.on("user_connected")
-    def on_user_join(hub_url: str, user) -> None:
-        print(f"  → {user.nick} joined")
+    def on_user_join(hub_url: str, nick: str) -> None:
+        print(f"  → {nick} joined")
 
     @client.on("user_disconnected")
-    def on_user_part(hub_url: str, user) -> None:
-        print(f"  ← {user.nick} left")
+    def on_user_part(hub_url: str, nick: str) -> None:
+        print(f"  ← {nick} left")
 
     # ─── Connect ───
 

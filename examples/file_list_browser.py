@@ -161,12 +161,12 @@ def main() -> None:
         print(f"[-] Disconnected: {reason}")
 
     @client.on("queue_item_added")
-    def on_queued(item):
-        print(f"[Q+] Queued: {item.target}")
+    def on_queued(target, size, tth):
+        print(f"[Q+] Queued: {target}")
 
     @client.on("download_complete")
-    def on_dl_done(transfer):
-        print(f"[OK] Downloaded: {transfer.target}")
+    def on_dl_done(target, nick, size, speed):
+        print(f"[OK] Downloaded: {target}")
 
     if args.local:
         # Open a locally cached file list directly

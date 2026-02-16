@@ -139,69 +139,73 @@ class _CallbackRouter(dc_core.DCClientCallback):
     def onHubRedirect(self, hubUrl: str, newUrl: str) -> None:
         self._dispatch("hub_redirect", hubUrl, newUrl)
 
-    def onHubGetPassword(self, hubUrl: str) -> None:
+    def onHubPasswordRequest(self, hubUrl: str) -> None:
         self._dispatch("hub_get_password", hubUrl)
 
     def onHubUpdated(self, hubUrl: str, hubName: str) -> None:
         self._dispatch("hub_updated", hubUrl, hubName)
 
-    def onHubNickTaken(self, hubUrl: str) -> None:
+    def onNickTaken(self, hubUrl: str) -> None:
         self._dispatch("hub_nick_taken", hubUrl)
 
     def onHubFull(self, hubUrl: str) -> None:
         self._dispatch("hub_full", hubUrl)
 
     # Chat events
-    def onChatMessage(self, hubUrl: str, nick: str, message: str) -> None:
-        self._dispatch("chat_message", hubUrl, nick, message)
+    def onChatMessage(self, hubUrl: str, nick: str, message: str,
+                      thirdPerson: bool) -> None:
+        self._dispatch("chat_message", hubUrl, nick, message, thirdPerson)
 
-    def onPrivateMessage(self, hubUrl: str, nick: str, message: str) -> None:
-        self._dispatch("private_message", hubUrl, nick, message)
+    def onPrivateMessage(self, hubUrl: str, fromNick: str, toNick: str,
+                         message: str) -> None:
+        self._dispatch("private_message", hubUrl, fromNick, toNick, message)
 
     def onStatusMessage(self, hubUrl: str, message: str) -> None:
         self._dispatch("status_message", hubUrl, message)
 
     # User events
-    def onUserConnected(self, hubUrl: str, user: dc_core.UserInfo) -> None:
-        self._dispatch("user_connected", hubUrl, user)
+    def onUserConnected(self, hubUrl: str, nick: str) -> None:
+        self._dispatch("user_connected", hubUrl, nick)
 
-    def onUserDisconnected(self, hubUrl: str, user: dc_core.UserInfo) -> None:
-        self._dispatch("user_disconnected", hubUrl, user)
+    def onUserDisconnected(self, hubUrl: str, nick: str) -> None:
+        self._dispatch("user_disconnected", hubUrl, nick)
 
-    def onUserUpdated(self, hubUrl: str, user: dc_core.UserInfo) -> None:
-        self._dispatch("user_updated", hubUrl, user)
+    def onUserUpdated(self, hubUrl: str, nick: str) -> None:
+        self._dispatch("user_updated", hubUrl, nick)
 
     # Search events
-    def onSearchResult(self, result: dc_core.SearchResultInfo) -> None:
-        self._dispatch("search_result", result)
+    def onSearchResult(self, hubUrl: str, file: str, size: int,
+                       freeSlots: int, totalSlots: int, tth: str,
+                       nick: str, isDirectory: bool) -> None:
+        self._dispatch("search_result", hubUrl, file, size, freeSlots,
+                        totalSlots, tth, nick, isDirectory)
 
     # Queue events
-    def onQueueItemAdded(self, item: dc_core.QueueItemInfo) -> None:
-        self._dispatch("queue_item_added", item)
+    def onQueueItemAdded(self, target: str, size: int, tth: str) -> None:
+        self._dispatch("queue_item_added", target, size, tth)
 
-    def onQueueItemFinished(self, item: dc_core.QueueItemInfo) -> None:
-        self._dispatch("queue_item_finished", item)
+    def onQueueItemFinished(self, target: str, size: int) -> None:
+        self._dispatch("queue_item_finished", target, size)
 
     def onQueueItemRemoved(self, target: str) -> None:
         self._dispatch("queue_item_removed", target)
 
     # Transfer events
-    def onDownloadStarting(self, transfer: dc_core.TransferInfo) -> None:
-        self._dispatch("download_starting", transfer)
+    def onDownloadStarting(self, target: str, nick: str, size: int) -> None:
+        self._dispatch("download_starting", target, nick, size)
 
-    def onDownloadComplete(self, transfer: dc_core.TransferInfo) -> None:
-        self._dispatch("download_complete", transfer)
+    def onDownloadComplete(self, target: str, nick: str, size: int,
+                           speed: int) -> None:
+        self._dispatch("download_complete", target, nick, size, speed)
 
-    def onDownloadFailed(
-        self, transfer: dc_core.TransferInfo, reason: str
-    ) -> None:
-        self._dispatch("download_failed", transfer, reason)
+    def onDownloadFailed(self, target: str, reason: str) -> None:
+        self._dispatch("download_failed", target, reason)
 
-    def onUploadStarting(self, transfer: dc_core.TransferInfo) -> None:
-        self._dispatch("upload_starting", transfer)
+    def onUploadStarting(self, file: str, nick: str, size: int) -> None:
+        self._dispatch("upload_starting", file, nick, size)
 
-    def onUploadComplete(self, transfer: dc_core.TransferInfo) -> None:
-        self._dispatch("upload_complete", transfer)
+    def onUploadComplete(self, file: str, nick: str, size: int) -> None:
+        self._dispatch("upload_complete", file, nick, size)
 
     # Hash events
     def onHashProgress(

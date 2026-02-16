@@ -65,7 +65,6 @@ class ActiveTransfer:
     """Track state of an active transfer."""
     target: str
     nick: str
-    hub_url: str
     size: int
     transferred: int = 0
     speed: int = 0
@@ -87,56 +86,54 @@ class ProgressTracker:
         self._queued: int = 0
         self._finished: int = 0
 
-    def on_download_starting(self, transfer) -> None:
+    def on_download_starting(self, target: str, nick: str, size: int) -> None:
         with self._lock:
             t = ActiveTransfer(
-                target=transfer.target,
-                nick=transfer.nick,
-                hub_url=transfer.hubUrl,
-                size=transfer.size,
-                transferred=transfer.transferred,
-                speed=transfer.speed,
+                target=target,
+                nick=nick,
+                size=size,
                 is_download=True,
             )
-            self._active[transfer.target] = t
-        self._print_event(f"[DL START] {os.path.basename(transfer.target)} "
-                          f"from {transfer.nick}")
+            self._active[target] = t
+        self._print_event(f"[DL START] {os.path.basename(target)} "
+                          f"from {nick}")
 
-    def on_download_complete(self, transfer) -> None:
+    def on_download_complete(self, target: str, nick: str, size: int,
+                             speed: int) -> None:
         with self._lock:
-            t = self._active.pop(transfer.target, None)
+            t = self._active.pop(target, None)
             if t:
                 t.completed = True
                 self._completed.append(t)
             self._finished += 1
-        self._print_event(f"[DL DONE]  {os.path.basename(transfer.target)} "
-                          f"({format_size(transfer.size)})")
+        self._print_event(f"[DL DONE]  {os.path.basename(target)} "
+                          f"({format_size(size)})")
 
-    def on_download_failed(self, transfer, reason: str) -> None:
+    def on_download_failed(self, target: str, reason: str) -> None:
         with self._lock:
-            t = self._active.pop(transfer.target, None)
+            t = self._active.pop(target, None)
             if t:
                 t.failed = True
                 t.fail_reason = reason
                 self._failed.append(t)
-        self._print_event(f"[DL FAIL]  {os.path.basename(transfer.target)}: "
+        self._print_event(f"[DL FAIL]  {os.path.basename(target)}: "
                           f"{reason}")
 
-    def on_upload_starting(self, transfer) -> None:
-        self._print_event(f"[UL START] {os.path.basename(transfer.target)} "
-                          f"to {transfer.nick}")
+    def on_upload_starting(self, file: str, nick: str, size: int) -> None:
+        self._print_event(f"[UL START] {os.path.basename(file)} "
+                          f"to {nick}")
 
-    def on_upload_complete(self, transfer) -> None:
-        self._print_event(f"[UL DONE]  {os.path.basename(transfer.target)}")
+    def on_upload_complete(self, file: str, nick: str, size: int) -> None:
+        self._print_event(f"[UL DONE]  {os.path.basename(file)}")
 
-    def on_queue_added(self, item) -> None:
+    def on_queue_added(self, target: str, size: int, tth: str) -> None:
         with self._lock:
             self._queued += 1
-        self._print_event(f"[QUEUED]   {os.path.basename(item.target)} "
-                          f"({format_size(item.size)})")
+        self._print_event(f"[QUEUED]   {os.path.basename(target)} "
+                          f"({format_size(size)})")
 
-    def on_queue_finished(self, item) -> None:
-        self._print_event(f"[Q DONE]   {os.path.basename(item.target)}")
+    def on_queue_finished(self, target: str, size: int) -> None:
+        self._print_event(f"[Q DONE]   {os.path.basename(target)}")
 
     def on_queue_removed(self, target: str) -> None:
         with self._lock:
