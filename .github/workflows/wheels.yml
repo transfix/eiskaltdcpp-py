@@ -1,0 +1,131 @@
+#
+# Build manylinux wheels with cibuildwheel + publish to PyPI
+#
+# Triggers:
+#   - Manual dispatch (workflow_dispatch)
+#   - Git tag push (v*)
+#
+# The wheel build uses FetchContent to compile eiskaltdcpp from source
+# inside the manylinux container, so no system libeiskaltdcpp-dev is needed.
+# auditwheel repair bundles all non-standard shared libraries.
+#
+name: Wheels
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: wheels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── Build wheels ───────────────────────────────────────────────
+  build-wheels:
+    name: Wheel ${{ matrix.os }} / ${{ matrix.arch }}
+    runs-on: [self-hosted, linux, x64]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==2.23.0
+
+      - name: Build wheels
+        run: python -m cibuildwheel --output-dir wheelhouse
+        env:
+          # Build for CPython 3.10-3.13 on x86_64
+          CIBW_BUILD: "cp310-manylinux_x86_64 cp311-manylinux_x86_64 cp312-manylinux_x86_64 cp313-manylinux_x86_64"
+          CIBW_SKIP: "*-musllinux_*"
+
+          # Use manylinux_2_28 image (AlmaLinux 8 based)
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+
+          # Install build dependencies inside the container
+          CIBW_BEFORE_ALL_LINUX: >
+            dnf install -y
+            openssl-devel zlib-devel bzip2-devel
+            pcre-devel pcre2-devel lua-devel
+            libidn-devel miniupnpc-devel
+            swig cmake gcc-c++ ninja-build
+
+          # auditwheel repair is run by cibuildwheel automatically
+          CIBW_REPAIR_WHEEL_COMMAND_LINUX: >
+            auditwheel repair -w {dest_dir} {wheel}
+
+          # Quick smoke test inside the container
+          CIBW_TEST_REQUIRES: pytest
+          CIBW_TEST_COMMAND: >
+            python -m pytest {project}/tests/ -v --tb=short
+
+          # Don't build from system eiskaltdcpp — use FetchContent
+          CIBW_ENVIRONMENT: >
+            CMAKE_ARGS="-DUSE_SYSTEM_EISKALTDCPP=OFF"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}-${{ matrix.arch }}
+          path: wheelhouse/*.whl
+
+  # ─── Build source distribution ──────────────────────────────────
+  build-sdist:
+    name: Source distribution
+    runs-on: [self-hosted, linux, x64]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist
+        run: python -m pip install build && python -m build --sdist --outdir dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  # ─── Publish to PyPI (only on tag push) ─────────────────────────
+  publish:
+    name: Publish to PyPI
+    needs: [build-wheels, build-sdist]
+    runs-on: [self-hosted, linux, x64]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+
+    # PyPI trusted publishing (OIDC) — no API tokens needed
+    # Configure at https://pypi.org/manage/project/eiskaltdcpp-py/settings/publishing/
+    permissions:
+      id-token: write
+
+    environment:
+      name: pypi
+      url: https://pypi.org/p/eiskaltdcpp-py
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist

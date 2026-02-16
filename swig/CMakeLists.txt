@@ -78,29 +78,50 @@ add_custom_command(TARGET dc_core POST_BUILD
     COMMENT "Version file synced"
 )
 
+# ---------------------------------------------------------------------------
+# Install destinations
+#
+# When scikit-build-core drives the build it defines SKBUILD and sets
+# CMAKE_INSTALL_PREFIX to a staging directory.  pyproject.toml's
+# wheel.install-dir = "eiskaltdcpp" means DESTINATION "." inside the
+# staging dir already maps to the eiskaltdcpp/ package directory in the
+# wheel.
+#
+# For standalone cmake builds (cmake .. && make && make install) we keep
+# the original behaviour of installing into Python3_SITEARCH.
+# ---------------------------------------------------------------------------
+if(DEFINED SKBUILD)
+    set(_PY_INSTALL_DIR ".")
+else()
+    set(_PY_INSTALL_DIR "${Python3_SITEARCH}/eiskaltdcpp")
+endif()
+
 # Install the SWIG module
 install(TARGETS dc_core
-    LIBRARY DESTINATION ${Python3_SITEARCH}/eiskaltdcpp
+    LIBRARY DESTINATION ${_PY_INSTALL_DIR}
     COMPONENT PythonModule
 )
 
 install(FILES
     ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/dc_core.py
-    DESTINATION ${Python3_SITEARCH}/eiskaltdcpp
+    DESTINATION ${_PY_INSTALL_DIR}
     COMPONENT PythonModule
-)
-
-# Install Python package files
-install(DIRECTORY
-    ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/
-    DESTINATION ${Python3_SITEARCH}/eiskaltdcpp
-    COMPONENT PythonModule
-    FILES_MATCHING PATTERN "*.py"
 )
 
 # Install generated _version.py
 install(FILES
     ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/_version.py
-    DESTINATION ${Python3_SITEARCH}/eiskaltdcpp
+    DESTINATION ${_PY_INSTALL_DIR}
     COMPONENT PythonModule
 )
+
+# For standalone cmake installs, also install the Python source files.
+# When using scikit-build-core, wheel.packages handles this automatically.
+if(NOT DEFINED SKBUILD)
+    install(DIRECTORY
+        ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/
+        DESTINATION ${_PY_INSTALL_DIR}
+        COMPONENT PythonModule
+        FILES_MATCHING PATTERN "*.py"
+    )
+endif()

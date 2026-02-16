@@ -22,6 +22,42 @@ This project wraps the eiskaltdcpp core C++ library via SWIG, providing:
 - File hashing control
 - Event-driven callback system (hub events, chat, users, transfers, etc.)
 
+## Installation
+
+### From PyPI (recommended)
+
+```bash
+pip install eiskaltdcpp-py
+```
+
+Pre-built wheels are available for Linux x86_64, Python 3.10–3.13.
+All C++ dependencies are bundled — no system packages needed.
+
+### From source (pip)
+
+```bash
+# Install build deps first
+sudo apt install cmake swig python3-dev libssl-dev zlib1g-dev libbz2-dev
+
+# pip install will compile from source; libeiskaltdcpp is fetched automatically
+pip install .
+```
+
+### From source (CMake)
+
+```bash
+# Install system deps
+sudo apt install cmake swig python3-dev libssl-dev zlib1g-dev libbz2-dev \
+    libeiskaltdcpp-dev   # optional — built from source if missing
+
+# Configure + build
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(nproc)
+
+# Run tests
+cd build && ctest -V
+```
+
 ## Requirements
 
 - **Python** ≥ 3.10
@@ -39,20 +75,7 @@ sudo apt install \
     libeiskaltdcpp-dev   # optional — built from source if missing
 ```
 
-## Building
-
-```bash
-# Configure
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-
-# Build
-cmake --build build -j$(nproc)
-
-# Run tests
-cd build && ctest -V
-```
-
-### CMake options
+## CMake options
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -212,6 +235,40 @@ eiskaltdcpp-py/
     ├── CMakeLists.txt          # Test configuration
     └── test_dc_core.py         # pytest tests (concurrency-safe)
 ```
+
+## Releasing to PyPI
+
+This project uses [cibuildwheel](https://cibuildwheel.pypa.io/) to build
+manylinux wheels and [PyPI trusted publishing](https://docs.pypi.org/trusted-publishers/)
+(OIDC) for upload — no API tokens needed.
+
+### Steps
+
+1. **Update the version** in `pyproject.toml` and `CMakeLists.txt`
+2. **Commit and push** to master
+3. **Create a git tag**:
+   ```bash
+   git tag v2.4.3
+   git push origin v2.4.3
+   ```
+4. The `Wheels` workflow automatically:
+   - Builds manylinux wheels for CPython 3.10–3.13 (x86_64)
+   - Builds a source distribution
+   - Publishes everything to PyPI
+
+You can also trigger a wheel build manually via the workflow dispatch button
+in GitHub Actions (without publishing).
+
+### One-time PyPI setup
+
+Register the project on PyPI, then configure trusted publishing:
+
+1. Go to https://pypi.org/manage/project/eiskaltdcpp-py/settings/publishing/
+2. Add a new publisher:
+   - **Owner**: `transfix`
+   - **Repository**: `eiskaltdcpp-py`
+   - **Workflow**: `wheels.yml`
+   - **Environment**: `pypi`
 
 ## License
 
