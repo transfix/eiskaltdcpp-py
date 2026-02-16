@@ -1,0 +1,144 @@
+#
+# eiskaltdcpp-py — Python SWIG bindings for libeiskaltdcpp
+#
+# Copyright (C) 2026 Verlihub Team
+# Licensed under GPL-3.0-or-later
+#
+
+cmake_minimum_required(VERSION 3.14)
+project(eiskaltdcpp-py VERSION 0.1.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+include(GNUInstallDirs)
+include(FetchContent)
+
+# ===========================================================================
+# Options
+# ===========================================================================
+
+option(BUILD_TESTS "Build tests" ON)
+option(USE_SYSTEM_EISKALTDCPP "Prefer system libeiskaltdcpp if available" ON)
+
+# ===========================================================================
+# Find Python
+# ===========================================================================
+
+find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+
+if(Python3_VERSION VERSION_LESS "3.10")
+    message(FATAL_ERROR "Python 3.10 or higher required, found ${Python3_VERSION}")
+endif()
+
+message(STATUS "Python ${Python3_VERSION} found: ${Python3_EXECUTABLE}")
+message(STATUS "  Include: ${Python3_INCLUDE_DIRS}")
+
+# ===========================================================================
+# Find SWIG
+# ===========================================================================
+
+find_package(SWIG 4.0 REQUIRED)
+include(UseSWIG)
+
+message(STATUS "SWIG ${SWIG_VERSION} found: ${SWIG_EXECUTABLE}")
+
+# ===========================================================================
+# Find libeiskaltdcpp — system package or FetchContent fallback
+# ===========================================================================
+
+set(EISKALTDCPP_FOUND FALSE)
+
+if(USE_SYSTEM_EISKALTDCPP)
+    # Try system-installed libeiskaltdcpp-dev
+    find_path(EISKALTDCPP_INCLUDE_DIR
+        NAMES dcpp/DCPlusPlus.h
+        PATHS
+            /usr/include/eiskaltdcpp
+            /usr/local/include/eiskaltdcpp
+    )
+
+    find_library(EISKALTDCPP_LIBRARY
+        NAMES eiskaltdcpp
+        PATHS
+            /usr/lib
+            /usr/lib/x86_64-linux-gnu
+            /usr/local/lib
+    )
+
+    if(EISKALTDCPP_INCLUDE_DIR AND EISKALTDCPP_LIBRARY)
+        message(STATUS "Found system libeiskaltdcpp:")
+        message(STATUS "  Include: ${EISKALTDCPP_INCLUDE_DIR}")
+        message(STATUS "  Library: ${EISKALTDCPP_LIBRARY}")
+
+        add_library(eiskaltdcpp::dcpp SHARED IMPORTED)
+        set_target_properties(eiskaltdcpp::dcpp PROPERTIES
+            IMPORTED_LOCATION "${EISKALTDCPP_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${EISKALTDCPP_INCLUDE_DIR}"
+        )
+        set(EISKALTDCPP_FOUND TRUE)
+    endif()
+endif()
+
+if(NOT EISKALTDCPP_FOUND)
+    message(STATUS "System libeiskaltdcpp not found, building from source via FetchContent...")
+
+    FetchContent_Declare(eiskaltdcpp
+        GIT_REPOSITORY https://github.com/eiskaltdcpp/eiskaltdcpp.git
+        GIT_TAG        v2.4.2
+        GIT_SHALLOW    TRUE
+    )
+
+    # Disable everything except the core library
+    set(NO_UI_DAEMON   ON  CACHE BOOL "" FORCE)
+    set(USE_QT         OFF CACHE BOOL "" FORCE)
+    set(USE_QT5        OFF CACHE BOOL "" FORCE)
+    set(USE_GTK        OFF CACHE BOOL "" FORCE)
+    set(USE_GTK3       OFF CACHE BOOL "" FORCE)
+    set(USE_ASPELL     OFF CACHE BOOL "" FORCE)
+    set(JSONRPC_DAEMON OFF CACHE BOOL "" FORCE)
+    set(XMLRPC_DAEMON  OFF CACHE BOOL "" FORCE)
+    set(WITH_DEV_FILES OFF CACHE BOOL "" FORCE)
+    set(WITH_EMOTICONS OFF CACHE BOOL "" FORCE)
+    set(WITH_EXAMPLES  OFF CACHE BOOL "" FORCE)
+    set(WITH_SOUNDS    OFF CACHE BOOL "" FORCE)
+    set(WITH_LUASCRIPTS OFF CACHE BOOL "" FORCE)
+    set(LUA_SCRIPT     OFF CACHE BOOL "" FORCE)
+    set(USE_CLI_JSONRPC OFF CACHE BOOL "" FORCE)
+    set(USE_CLI_XMLRPC  OFF CACHE BOOL "" FORCE)
+    set(USE_MINIUPNP   ON  CACHE BOOL "" FORCE)
+    set(PERL_REGEX     ON  CACHE BOOL "" FORCE)
+
+    FetchContent_MakeAvailable(eiskaltdcpp)
+
+    if(TARGET dcpp)
+        add_library(eiskaltdcpp::dcpp ALIAS dcpp)
+        # Get the include directory from the fetched source
+        set(EISKALTDCPP_INCLUDE_DIR "${eiskaltdcpp_SOURCE_DIR}")
+    else()
+        message(FATAL_ERROR "FetchContent built eiskaltdcpp but 'dcpp' target not found")
+    endif()
+
+    set(EISKALTDCPP_FOUND TRUE)
+endif()
+
+# ===========================================================================
+# C++ bridge library (static, linked into SWIG module)
+# ===========================================================================
+
+add_subdirectory(src)
+
+# ===========================================================================
+# SWIG Python module
+# ===========================================================================
+
+add_subdirectory(swig)
+
+# ===========================================================================
+# Tests
+# ===========================================================================
+
+if(BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

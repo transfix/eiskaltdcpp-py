@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eiskaltdcpp-py"
+version = "0.1.0"
+description = "Python bindings for libeiskaltdcpp — full-featured DC (Direct Connect) client"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+requires-python = ">=3.10"
+authors = [
+    {name = "Verlihub Team", email = "info@verlihub.net"},
+]
+keywords = ["dc", "direct-connect", "nmdc", "adc", "p2p", "file-sharing"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Communications :: File Sharing",
+    "Topic :: Internet",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+Homepage = "https://github.com/verlihub/eiskaltdcpp-py"
+Repository = "https://github.com/verlihub/eiskaltdcpp-py"
+Issues = "https://github.com/verlihub/eiskaltdcpp-py/issues"
+
+[tool.setuptools.packages.find]
+where = ["python"]
+include = ["eiskaltdcpp*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"

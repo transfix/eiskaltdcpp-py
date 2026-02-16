@@ -1,0 +1,30 @@
+# Build
+build/
+_build/
+*.o
+*.so
+*.dylib
+*.a
+
+# SWIG generated
+swig/*_wrap.cxx
+swig/*_wrap.cpp
+swig/*.py
+!swig/*.i
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
