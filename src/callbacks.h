@@ -40,6 +40,9 @@ public:
     // Hub events
     // =====================================================================
 
+    /// Hub is connecting.
+    virtual void onHubConnecting(const std::string& hubUrl) {}
+
     /// Hub connection established.
     virtual void onHubConnected(const std::string& hubUrl,
                                 const std::string& hubName) {}
@@ -61,6 +64,9 @@ public:
 
     /// Nick is already taken.
     virtual void onNickTaken(const std::string& hubUrl) {}
+
+    /// Hub is full.
+    virtual void onHubFull(const std::string& hubUrl) {}
 
     // =====================================================================
     // Chat events

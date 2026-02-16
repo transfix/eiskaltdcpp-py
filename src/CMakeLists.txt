@@ -14,6 +14,7 @@ set(BRIDGE_HEADERS
     bridge.h
     bridge_listeners.h
     callbacks.h
+    dcpp_compat.h
     types.h
 )
 

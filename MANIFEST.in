@@ -1,0 +1,15 @@
+# Source distribution manifest
+include CMakeLists.txt
+include README.md
+include LICENSE
+include pyproject.toml
+
+recursive-include src *.cpp *.h CMakeLists.txt
+recursive-include swig *.i CMakeLists.txt
+recursive-include python *.py
+recursive-include tests *.py CMakeLists.txt
+recursive-include cmake *.cmake
+
+prune build
+prune .git
+global-exclude __pycache__ *.py[cod]

@@ -84,10 +84,10 @@ namespace std {
  *           print(f"<{nick}> {message}")
  *
  *       def onSearchResult(self, result):
- *           print(f"Found: {result.fileName} ({result.fileSize} bytes)")
+ *           print(f"Found: {result.file} ({result.size} bytes)")
  *
  *       def onDownloadComplete(self, transfer):
- *           print(f"Downloaded: {transfer.target}")
+ *           print(f"Downloaded: {transfer.filename}")
  */
 %feature("director") eiskaltdcpp_py::DCClientCallback;
 
@@ -134,8 +134,8 @@ namespace std {
 %feature("python:slot", "tp_str", functype="reprfunc") eiskaltdcpp_py::SearchResultInfo::__str__;
 %extend eiskaltdcpp_py::SearchResultInfo {
     std::string __str__() {
-        return "SearchResult(file='" + $self->fileName +
-               "', size=" + std::to_string($self->fileSize) +
+        return "SearchResult(file='" + $self->file +
+               "', size=" + std::to_string($self->size) +
                ", nick='" + $self->nick +
                "', slots=" + std::to_string($self->freeSlots) +
                "/" + std::to_string($self->totalSlots) + ")";
@@ -157,8 +157,8 @@ namespace std {
 %extend eiskaltdcpp_py::TransferInfo {
     std::string __str__() {
         std::string dir = $self->isDownload ? "DL" : "UL";
-        return "Transfer(" + dir + " '" + $self->target +
-               "', " + std::to_string($self->transferred) +
+        return "Transfer(" + dir + " '" + $self->filename +
+               "', " + std::to_string($self->pos) +
                "/" + std::to_string($self->size) +
                ", speed=" + std::to_string($self->speed) + ")";
     }
