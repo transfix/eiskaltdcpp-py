@@ -70,19 +70,37 @@ add_custom_command(TARGET dc_core POST_BUILD
     COMMENT "SWIG Python module built: dc_core"
 )
 
+# Ensure _version.py is also in the build tree for tests
+add_custom_command(TARGET dc_core POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/_version.py
+        ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/_version.py
+    COMMENT "Version file synced"
+)
+
 # Install the SWIG module
 install(TARGETS dc_core
     LIBRARY DESTINATION ${Python3_SITEARCH}/eiskaltdcpp
+    COMPONENT PythonModule
 )
 
 install(FILES
     ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/dc_core.py
     DESTINATION ${Python3_SITEARCH}/eiskaltdcpp
+    COMPONENT PythonModule
 )
 
 # Install Python package files
 install(DIRECTORY
     ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/
     DESTINATION ${Python3_SITEARCH}/eiskaltdcpp
+    COMPONENT PythonModule
     FILES_MATCHING PATTERN "*.py"
+)
+
+# Install generated _version.py
+install(FILES
+    ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/_version.py
+    DESTINATION ${Python3_SITEARCH}/eiskaltdcpp
+    COMPONENT PythonModule
 )

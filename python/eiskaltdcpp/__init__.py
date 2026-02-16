@@ -7,7 +7,11 @@
 # Copyright (C) 2026 Verlihub Team
 # Licensed under GPL-3.0-or-later
 
-__version__ = "0.1.0"
+# Version — prefer CMake-generated _version.py, fall back to hardcoded
+try:
+    from eiskaltdcpp._version import __version__
+except ImportError:
+    __version__ = "2.4.2"
 
 # Import high-level wrapper when SWIG module is available
 try:

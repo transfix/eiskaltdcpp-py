@@ -1,16 +1,16 @@
 [build-system]
-requires = ["setuptools>=68.0"]
-build-backend = "setuptools.build_meta"
+requires = ["scikit-build-core>=0.10", "swig>=4.0"]
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "eiskaltdcpp-py"
-version = "0.1.0"
+version = "2.4.2"
 description = "Python bindings for libeiskaltdcpp — full-featured DC (Direct Connect) client"
 readme = "README.md"
 license = "GPL-3.0-or-later"
 requires-python = ">=3.10"
 authors = [
-    {name = "Verlihub Team", email = "info@verlihub.net"},
+    {name = "transfix"},
 ]
 keywords = ["dc", "direct-connect", "nmdc", "adc", "p2p", "file-sharing"]
 classifiers = [
@@ -23,6 +23,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: Implementation :: CPython",
     "Topic :: Communications :: File Sharing",
     "Topic :: Internet",
@@ -30,13 +31,24 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/verlihub/eiskaltdcpp-py"
-Repository = "https://github.com/verlihub/eiskaltdcpp-py"
-Issues = "https://github.com/verlihub/eiskaltdcpp-py/issues"
+Homepage = "https://github.com/transfix/eiskaltdcpp-py"
+Repository = "https://github.com/transfix/eiskaltdcpp-py"
+Issues = "https://github.com/transfix/eiskaltdcpp-py/issues"
+Changelog = "https://github.com/transfix/eiskaltdcpp-py/releases"
 
-[tool.setuptools.packages.find]
-where = ["python"]
-include = ["eiskaltdcpp*"]
+# --- scikit-build-core settings ---
+
+[tool.scikit-build]
+cmake.version = ">=3.14"
+cmake.build-type = "Release"
+wheel.packages = ["python/eiskaltdcpp"]
+wheel.install-dir = "eiskaltdcpp"
+install.components = ["PythonModule"]
+
+[tool.scikit-build.cmake.define]
+BUILD_TESTS = "OFF"
+
+# --- pytest ---
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

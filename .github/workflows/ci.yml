@@ -1,0 +1,66 @@
+#
+# CI — build + test on every PR and push to master
+#
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: [self-hosted, linux, x64]
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+        build-type: [Release]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake swig \
+            libssl-dev zlib1g-dev libbz2-dev \
+            libeiskaltdcpp-dev
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest
+
+      - name: Configure
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
+            -DBUILD_TESTS=ON \
+            -DPython3_EXECUTABLE=$(which python)
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Run tests (CTest)
+        working-directory: build
+        run: ctest --output-on-failure -j$(nproc)
+
+      - name: Run tests (pytest direct)
+        run: |
+          PYTHONPATH=build/python python -m pytest tests/ -v --tb=short
