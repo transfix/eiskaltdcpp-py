@@ -47,4 +47,30 @@ void BridgeListeners::stashSearchResult(const SearchResultInfo& info) {
     }
 }
 
+void BridgeListeners::stashUserUpdate(const std::string& hubUrl,
+                                       const dcpp::OnlineUser& ou) {
+    if (!m_bridge) return;
+    std::lock_guard<std::mutex> lk(m_bridge->m_mutex);
+    auto* hd = m_bridge->findHub(hubUrl);
+    if (!hd) return;
+    hd->users[ou.getIdentity().getNick()] = userFromOnlineUser(ou);
+}
+
+void BridgeListeners::stashUserRemove(const std::string& hubUrl,
+                                       const std::string& nick) {
+    if (!m_bridge) return;
+    std::lock_guard<std::mutex> lk(m_bridge->m_mutex);
+    auto* hd = m_bridge->findHub(hubUrl);
+    if (!hd) return;
+    hd->users.erase(nick);
+}
+
+void BridgeListeners::clearHubUsers(const std::string& hubUrl) {
+    if (!m_bridge) return;
+    std::lock_guard<std::mutex> lk(m_bridge->m_mutex);
+    auto* hd = m_bridge->findHub(hubUrl);
+    if (!hd) return;
+    hd->users.clear();
+}
+
 } // namespace eiskaltdcpp_py

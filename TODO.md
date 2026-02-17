@@ -57,6 +57,15 @@ locally.  In the meantime, the workaround is to never call
 
 ## Other items
 
+- [ ] **Recover in-process multi-client integration tests.**  Once the
+      upstream singleton issue is fixed (or we ship a `Context`-based
+      refactor), bring back the original two-client-in-one-process
+      integration tests that verify PM exchange, mutual user-list
+      visibility, file-list browsing, and file downloads between Alice
+      and Bob.  The original tests are preserved in git history
+      (commit `5ac0d76`).  Until then, multi-client scenarios are
+      covered by the subprocess-based tests in
+      `tests/test_integration.py` (`TestMultiClient*` classes).
 - [ ] Expose `SettingsManager` int64 and float settings through
       `getSetting()`/`setSetting()` (currently only string and int are
       properly handled).

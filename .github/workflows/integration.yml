@@ -4,8 +4,11 @@
 # Runs as a SEPARATE job from the regular build+test CI.
 # Triggered on PR and push to master, same as ci.yml,
 # but tests network connectivity to:
-#   - nmdcs://paladin.sublevels.net:411
 #   - nmdcs://wintermute.sublevels.net:411
+#
+# Single-client tests run in-process.
+# Multi-client tests spawn each client as a separate subprocess
+# (each gets its own dcpp singletons, avoiding the singleton hang).
 #
 name: Integration Tests
 
@@ -23,7 +26,7 @@ jobs:
   integration:
     name: Integration tests
     runs-on: [self-hosted, linux, x64]
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     # Allow the job to fail without blocking the PR — network issues
     # with live hubs should not prevent merging.

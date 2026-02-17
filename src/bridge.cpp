@@ -225,27 +225,37 @@ void DCBridge::shutdown() {
         return;
     }
 
-    std::lock_guard<std::mutex> lock(m_mutex);
-
-    // Unsubscribe from global managers
+    // Unsubscribe from global managers (safe without m_mutex —
+    // these are single-threaded calls that don't touch m_hubs)
     BridgeListeners::getInstance().unsubscribeGlobal();
     BridgeListeners::getInstance().setBridge(nullptr);
     BridgeListeners::getInstance().setCallback(nullptr);
 
-    // Close all file lists
-    for (auto& [id, listing] : m_fileLists) {
-        delete listing;
-    }
-    m_fileLists.clear();
+    // Collect hub clients and file lists under the lock, then release
+    std::vector<Client*> clients;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
 
-    // Disconnect all hubs
-    for (auto& [url, data] : m_hubs) {
-        if (data.client) {
-            data.client->disconnect(true);
-            ClientManager::getInstance()->putClient(data.client);
+        // Close all file lists
+        for (auto& [id, listing] : m_fileLists) {
+            delete listing;
         }
+        m_fileLists.clear();
+
+        // Collect hub clients
+        for (auto& [url, data] : m_hubs) {
+            if (data.client) {
+                clients.push_back(data.client);
+            }
+        }
+        m_hubs.clear();
     }
-    m_hubs.clear();
+
+    // m_mutex released — safe to call into dcpp (avoids ABBA deadlock)
+    for (auto* client : clients) {
+        client->disconnect(true);
+        ClientManager::getInstance()->putClient(client);
+    }
 
     // Shut down core library
     dcpp::shutdown();
@@ -275,11 +285,14 @@ void DCBridge::connectHub(const std::string& url,
                           const std::string& encoding) {
     if (!m_initialized.load()) return;
 
-    std::lock_guard<std::mutex> lock(m_mutex);
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        // Don't connect twice
+        if (m_hubs.count(url) > 0) return;
+    }
 
-    // Don't connect twice
-    if (m_hubs.count(url) > 0) return;
-
+    // m_mutex released — safe to call into dcpp (avoids ABBA deadlock
+    // with ClientManager::cs / NmdcHub::cs held by hub socket threads)
     Client* client = ClientManager::getInstance()->getClient(url);
     if (!client) return;
 
@@ -292,41 +305,59 @@ void DCBridge::connectHub(const std::string& url,
 
     client->connect();
 
-    HubData hd;
-    hd.client = client;
-    m_hubs[url] = std::move(hd);
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        HubData hd;
+        hd.client = client;
+        m_hubs[url] = std::move(hd);
+    }
 }
 
 void DCBridge::disconnectHub(const std::string& url) {
     if (!m_initialized.load()) return;
 
-    std::lock_guard<std::mutex> lock(m_mutex);
+    Client* client = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_hubs.find(url);
+        if (it == m_hubs.end()) return;
+        client = it->second.client;
+        m_hubs.erase(it);
+    }
 
-    auto it = m_hubs.find(url);
-    if (it == m_hubs.end()) return;
-
-    BridgeListeners::getInstance().detach(it->second.client);
-    it->second.client->disconnect(true);
-    ClientManager::getInstance()->putClient(it->second.client);
-    m_hubs.erase(it);
+    // m_mutex released — safe to call into dcpp (avoids ABBA deadlock)
+    if (client) {
+        BridgeListeners::getInstance().detach(client);
+        client->disconnect(true);
+        ClientManager::getInstance()->putClient(client);
+    }
 }
 
 std::vector<HubInfo> DCBridge::listHubs() {
     std::vector<HubInfo> result;
     if (!m_initialized.load()) return result;
 
-    std::lock_guard<std::mutex> lock(m_mutex);
+    // Snapshot the url→client pointers under the lock
+    std::vector<std::pair<std::string, Client*>> snapshot;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        snapshot.reserve(m_hubs.size());
+        for (auto& [url, data] : m_hubs) {
+            snapshot.emplace_back(url, data.client);
+        }
+    }
 
-    for (auto& [url, data] : m_hubs) {
+    // m_mutex released — safe to call dcpp accessors (avoids ABBA deadlock)
+    for (auto& [url, client] : snapshot) {
         HubInfo info;
         info.url = url;
-        if (data.client) {
-            info.name = data.client->getHubName();
-            info.description = data.client->getHubDescription();
-            info.userCount = data.client->getUserCount();
-            info.sharedBytes = data.client->getAvailable();
-            info.connected = data.client->isConnected();
-            info.isOp = data.client->isOp();
+        if (client) {
+            info.name = client->getHubName();
+            info.description = client->getHubDescription();
+            info.userCount = client->getUserCount();
+            info.sharedBytes = client->getAvailable();
+            info.connected = client->isConnected();
+            info.isOp = client->isOp();
         }
         result.push_back(std::move(info));
     }
@@ -349,11 +380,15 @@ void DCBridge::sendMessage(const std::string& hubUrl,
                            const std::string& message) {
     if (!m_initialized.load()) return;
 
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto* client = findClient(hubUrl);
-    if (client) {
-        client->hubMessage(message);
+    Client* client;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        client = findClient(hubUrl);
+        if (!client) return;
     }
+    // m_mutex released — safe to call into dcpp (avoids ABBA deadlock
+    // with NmdcHub::cs held by the hub socket thread)
+    client->hubMessage(message);
 }
 
 void DCBridge::sendPM(const std::string& hubUrl,
@@ -361,11 +396,13 @@ void DCBridge::sendPM(const std::string& hubUrl,
                       const std::string& message) {
     if (!m_initialized.load()) return;
 
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto* client = findClient(hubUrl);
-    if (!client) return;
-
-    // Find the user via CID lookup
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto* client = findClient(hubUrl);
+        if (!client) return;
+    }
+    // m_mutex released — safe to call into dcpp (avoids ABBA deadlock
+    // with NmdcHub::cs / ClientManager::cs held by the hub socket thread)
     UserPtr user = ClientManager::getInstance()->findUser(nick, hubUrl);
     if (user) {
         HintedUser hu(user, hubUrl);
@@ -401,13 +438,13 @@ std::vector<UserInfo> DCBridge::getHubUsers(const std::string& hubUrl) {
     if (!m_initialized.load()) return result;
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    auto* client = findClient(hubUrl);
-    if (!client) return result;
+    auto* hd = findHub(hubUrl);
+    if (!hd) return result;
 
-    // TODO: The dcpp core stores users per-hub inside NmdcHub/AdcHub
-    // private maps, with no public iteration API.  The correct long-term
-    // approach is to maintain a local user map via UserUpdated/UserRemoved
-    // callbacks.  For now, return the user count via HubInfo instead.
+    result.reserve(hd->users.size());
+    for (auto& [nick, ui] : hd->users) {
+        result.push_back(ui);
+    }
     return result;
 }
 
@@ -417,11 +454,13 @@ UserInfo DCBridge::getUserInfo(const std::string& nick,
     ui.nick = nick;
     if (!m_initialized.load()) return ui;
 
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto* client = findClient(hubUrl);
-    if (!client) return ui;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto* client = findClient(hubUrl);
+        if (!client) return ui;
+    }
 
-    // Look up user via CID-based find, then get their identity
+    // m_mutex released — safe to call ClientManager (avoids ABBA deadlock)
     UserPtr user = ClientManager::getInstance()->findUser(nick, hubUrl);
     if (user) {
         Identity id = ClientManager::getInstance()->getOnlineUserIdentity(user);
@@ -445,8 +484,12 @@ bool DCBridge::search(const std::string& query, int fileType,
                       const std::string& hubUrl) {
     if (!m_initialized.load()) return false;
 
-    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!hubUrl.empty()) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (!findClient(hubUrl)) return false;
+    }
 
+    // m_mutex released — safe to call SearchManager (avoids ABBA deadlock)
     auto sm = SearchManager::getInstance();
     auto token = Util::toString(Util::rand());
 
@@ -629,11 +672,13 @@ bool DCBridge::requestFileList(const std::string& hubUrl,
                                bool matchQueue) {
     if (!m_initialized.load()) return false;
 
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto* client = findClient(hubUrl);
-    if (!client) return false;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto* client = findClient(hubUrl);
+        if (!client) return false;
+    }
 
-    // Find user and request file list
+    // m_mutex released — safe to call ClientManager/QueueManager
     UserPtr user = ClientManager::getInstance()->findUser(nick, hubUrl);
     if (user) {
         try {

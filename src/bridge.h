@@ -299,6 +299,9 @@ private:
         dcpp::Client* client = nullptr;
         std::deque<std::string> chatHistory;
         std::vector<SearchResultInfo> searchResults;
+        // Per-hub user map: nick → UserInfo, populated by
+        // ClientListener::UserUpdated / UserRemoved callbacks.
+        std::unordered_map<std::string, UserInfo> users;
     };
 
     // State
