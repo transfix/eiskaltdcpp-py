@@ -33,7 +33,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import pytest_asyncio
+try:
+    import pytest_asyncio
+except ImportError:
+    pytest_asyncio = None  # collected but skipped when not installed
 
 # ── Locate SWIG module ──────────────────────────────────────────────
 BUILD_DIR = Path(__file__).parent.parent / "build" / "python"
@@ -48,6 +51,7 @@ except ImportError:
 
 pytestmark = [
     pytest.mark.skipif(not SWIG_AVAILABLE, reason="dc_core SWIG module not built"),
+    pytest.mark.skipif(pytest_asyncio is None, reason="pytest-asyncio not installed"),
     pytest.mark.integration,
     pytest.mark.asyncio,
 ]
