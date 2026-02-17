@@ -127,7 +127,7 @@ if(NOT EISKALTDCPP_FOUND)
     set(WITH_EXAMPLES  OFF CACHE BOOL "" FORCE)
     set(WITH_SOUNDS    OFF CACHE BOOL "" FORCE)
     set(WITH_LUASCRIPTS OFF CACHE BOOL "" FORCE)
-    set(LUA_SCRIPT     OFF CACHE BOOL "" FORCE)
+    set(LUA_SCRIPT     ON  CACHE BOOL "" FORCE)
     set(USE_CLI_JSONRPC OFF CACHE BOOL "" FORCE)
     set(USE_CLI_XMLRPC  OFF CACHE BOOL "" FORCE)
     set(USE_MINIUPNP   ON  CACHE BOOL "" FORCE)
@@ -141,6 +141,18 @@ if(NOT EISKALTDCPP_FOUND)
         set(EISKALTDCPP_INCLUDE_DIR "${eiskaltdcpp_SOURCE_DIR}")
     else()
         message(FATAL_ERROR "FetchContent built eiskaltdcpp but 'dcpp' target not found")
+    endif()
+
+    # When LUA_SCRIPT is ON, the FetchContent-built dcpp defines -DLUA_SCRIPT
+    # globally and links against Lua.  Our bridge code must also compile with
+    # LUA_SCRIPT to match the ABI (Client inherits from ClientScriptInstance).
+    find_package(Lua 5.2)
+    if(LUA_FOUND)
+        message(STATUS "FetchContent eiskaltdcpp built with Lua scripting — enabling LUA_SCRIPT for bridge ABI")
+        set(EISKALTDCPP_HAS_LUA TRUE)
+    else()
+        message(WARNING "LUA_SCRIPT enabled but Lua dev headers not found in container — ABI mismatch possible")
+        set(EISKALTDCPP_HAS_LUA FALSE)
     endif()
 
     set(EISKALTDCPP_FOUND TRUE)

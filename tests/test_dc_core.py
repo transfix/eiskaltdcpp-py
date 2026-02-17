@@ -146,6 +146,71 @@ class TestDCBridgeCreation:
 
 
 # ============================================================================
+# Settings and initialization tests
+# ============================================================================
+
+class TestBridgeSettings:
+    """Tests for settings get/set and automatic nick generation.
+
+    These tests share a single bridge instance because dcpp's global
+    singletons don't support repeated startup()/shutdown() cycles within
+    the same process.
+    """
+
+    @pytest.fixture(autouse=True, scope="class")
+    def bridge(self, tmp_path_factory):
+        """Create a single bridge for all settings tests."""
+        cfg = tmp_path_factory.mktemp("dc-settings-tests")
+        b = dc_core.DCBridge()
+        ok = b.initialize(str(cfg) + "/")
+        assert ok, "Bridge initialization failed"
+        yield b
+        b.shutdown()
+
+    def test_get_setting_returns_value(self, bridge):
+        """getSetting returns a value after initialization."""
+        # DownloadDirectory always has a non-empty default
+        dl_dir = bridge.getSetting("DownloadDirectory")
+        assert isinstance(dl_dir, str)
+        assert len(dl_dir) > 0
+
+    def test_set_and_get_setting(self, bridge):
+        """setSetting persists a value readable by getSetting."""
+        bridge.setSetting("Description", "pytest-bot")
+        val = bridge.getSetting("Description")
+        assert val == "pytest-bot"
+
+    def test_default_nick_assigned(self, bridge):
+        """A default nick is generated when none is configured."""
+        nick = bridge.getSetting("Nick")
+        assert nick, "Expected a non-empty default nick"
+        assert nick.startswith("dcpy-"), \
+            f"Default nick should start with 'dcpy-', got {nick!r}"
+
+    def test_nick_survives_set(self, bridge):
+        """Nick set via setSetting is readable."""
+        bridge.setSetting("Nick", "my-test-nick")
+        assert bridge.getSetting("Nick") == "my-test-nick"
+
+    def test_unknown_setting_returns_empty(self, bridge):
+        """getSetting returns empty string for unknown setting names."""
+        val = bridge.getSetting("NonExistentSetting99")
+        assert val == ""
+
+    def test_lua_init_no_crash(self, bridge):
+        """Initializing the bridge doesn't crash due to Lua scripting.
+
+        When the system libeiskaltdcpp is compiled with LUA_SCRIPT,
+        every incoming NMDC line passes through a Lua hook.  If the
+        Lua state isn't initialized, that path segfaults.  This test
+        verifies that initialize() correctly sets up the Lua state
+        (or gracefully handles the absence of Lua support).
+        """
+        # If we got here without a segfault, the Lua init worked
+        assert bridge.isInitialized()
+
+
+# ============================================================================
 # Data type tests
 # ============================================================================
 

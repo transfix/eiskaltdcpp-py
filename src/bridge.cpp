@@ -43,10 +43,12 @@
 #endif
 
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 
 #include <dlfcn.h>   // dlsym — for runtime Lua scripting init
+#include <unistd.h>  // getpid — for default nick generation
 
 using namespace dcpp;
 
@@ -165,6 +167,18 @@ bool DCBridge::initialize(const std::string& configDir) {
     // Start the core library — creates all singleton managers, loads
     // settings, favorites, certificates, hashing, share refresh, and queue.
     dcpp::startup(startupCallback, nullptr);
+
+    // Ensure a nick is set — without one the NMDC handshake sends an empty
+    // $ValidateNick which the hub rejects, leaving connected=false forever.
+    {
+        auto* sm = SettingsManager::getInstance();
+        std::string currentNick = sm->get(SettingsManager::NICK, true);
+        if (currentNick.empty()) {
+            // Generate a default nick: "dcpy-<pid>"
+            std::string defaultNick = "dcpy-" + std::to_string(getpid());
+            sm->set(SettingsManager::NICK, defaultNick);
+        }
+    }
 
     // Initialize the Lua scripting state if the library was compiled with
     // Lua support.  Without this, NMDC hub callbacks that pass through the
@@ -860,17 +874,47 @@ void DCBridge::pauseHashing(bool pause) {
 std::string DCBridge::getSetting(const std::string& name) {
     if (!m_initialized.load()) return "";
 
-    // This mirrors the daemon's settingsGetSet
     auto* sm = SettingsManager::getInstance();
-    // Try string settings first, then int
-    // TODO: full name-to-enum mapping
+
+    // Resolve setting name → enum index + type.
+    int n = 0;
+    SettingsManager::Types type{};
+    if (!sm->getType(name.c_str(), n, type))
+        return "";  // unknown setting name
+
+    // Read with useDefault=true so defaults (e.g. DownloadDirectory) are
+    // returned even when the user hasn't explicitly overridden them.
+    if (type == SettingsManager::TYPE_STRING)
+        return sm->get(static_cast<SettingsManager::StrSetting>(n), true);
+    else if (type == SettingsManager::TYPE_INT)
+        return std::to_string(sm->get(static_cast<SettingsManager::IntSetting>(n), true));
+    else if (type == SettingsManager::TYPE_INT64)
+        return std::to_string(sm->get(static_cast<SettingsManager::Int64Setting>(n), true));
+
     return "";
 }
 
 void DCBridge::setSetting(const std::string& name,
                           const std::string& value) {
     if (!m_initialized.load()) return;
-    // TODO: full name-to-enum mapping
+
+    auto* sm = SettingsManager::getInstance();
+
+    int n = 0;
+    SettingsManager::Types type{};
+    if (!sm->getType(name.c_str(), n, type))
+        return;  // unknown setting name
+
+    if (type == SettingsManager::TYPE_STRING)
+        sm->set(static_cast<SettingsManager::StrSetting>(n), value);
+    else if (type == SettingsManager::TYPE_INT)
+        sm->set(static_cast<SettingsManager::IntSetting>(n), std::atoi(value.c_str()));
+    else if (type == SettingsManager::TYPE_INT64)
+        sm->set(static_cast<SettingsManager::Int64Setting>(n),
+                static_cast<int64_t>(std::atoll(value.c_str())));
+
+    // Save to disk so changes persist
+    sm->save();
 }
 
 void DCBridge::reloadConfig() {
