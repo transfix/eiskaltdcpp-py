@@ -110,7 +110,9 @@ with DCClient('/tmp/dc-config') as client:
 ### Search and download
 
 ```python
-client.search('ubuntu iso', file_type=0)
+# file_type: 0=any, 1=audio, 2=compressed, 3=document,
+#            4=executable, 5=picture, 6=video, 7=folder, 8=TTH
+client.search('ubuntu iso', file_type=0)  # 0 = search all file types
 
 import time
 time.sleep(5)  # Wait for results
