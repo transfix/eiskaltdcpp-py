@@ -284,6 +284,13 @@ public:
                                     "Search flood: " + msg);
     }
 
+    void on(dcpp::ClientListener::NmdcSearch, dcpp::Client* c,
+            const std::string& seeker, int searchType, int64_t size,
+            int fileType, const std::string& searchStr) noexcept override {
+        // No action needed — the search is handled internally by
+        // ShareManager via the hub connection.
+    }
+
     // =================================================================
     // SearchManagerListener overrides
     // =================================================================

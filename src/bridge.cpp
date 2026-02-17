@@ -558,7 +558,9 @@ void DCBridge::clearSearchResults(const std::string& hubUrl) {
 bool DCBridge::addToQueue(const std::string& directory,
                           const std::string& name,
                           int64_t size,
-                          const std::string& tth) {
+                          const std::string& tth,
+                          const std::string& hubUrl,
+                          const std::string& nick) {
     if (!m_initialized.load()) return false;
 
     try {
@@ -566,8 +568,21 @@ bool DCBridge::addToQueue(const std::string& directory,
         if (!target.empty() && target.back() != '/') target += '/';
         target += name;
 
+        HintedUser hu;
+        if (!nick.empty() && !hubUrl.empty()) {
+            auto user = ClientManager::getInstance()->findUser(nick, hubUrl);
+            if (!user) {
+                // findUser generates CID from nick+hub — try getUser which
+                // creates the User object if needed
+                user = ClientManager::getInstance()->getUser(nick, hubUrl);
+            }
+            if (user) {
+                hu = HintedUser(user, hubUrl);
+            }
+        }
+
         QueueManager::getInstance()->add(target, size,
-            TTHValue(tth), HintedUser(),
+            TTHValue(tth), hu,
             QueueItem::FLAG_NORMAL);
         return true;
     } catch (const Exception& e) {

@@ -361,14 +361,9 @@ class AsyncDCClient:
             self._dispatch_event(
                 "download_complete", target, nick, size, speed
             )
-            ev = self._download_events.get(target)
-            if ev:
-                self._download_results[target] = (True, "")
-                try:
-                    loop = self._ensure_loop()
-                    loop.call_soon_threadsafe(ev.set)
-                except RuntimeError:
-                    pass
+            # NOTE: don't signal _download_events here — the file hasn't
+            # been moved from .dctmp to its final target yet.  Wait for
+            # queue_item_finished which fires after the rename.
 
         @self._sync_client.on("download_failed")
         def _on_df(target, reason):
@@ -650,10 +645,13 @@ class AsyncDCClient:
     # ------------------------------------------------------------------
 
     def download(
-        self, directory: str, name: str, size: int, tth: str
+        self, directory: str, name: str, size: int, tth: str,
+        hub_url: str = "", nick: str = "",
     ) -> bool:
         """Add a file to the download queue."""
-        return self._sync_client.download(directory, name, size, tth)
+        return self._sync_client.download(
+            directory, name, size, tth, hub_url=hub_url, nick=nick
+        )
 
     def download_magnet(
         self, magnet: str, download_dir: str = ""
@@ -668,6 +666,8 @@ class AsyncDCClient:
         size: int,
         tth: str,
         *,
+        hub_url: str = "",
+        nick: str = "",
         timeout: float = 60.0,
     ) -> tuple[bool, str]:
         """
@@ -682,9 +682,10 @@ class AsyncDCClient:
         self._download_results[target] = (False, "timeout")
 
         try:
-            self.download(directory, name, size, tth)
+            ok = self.download(directory, name, size, tth, hub_url=hub_url, nick=nick)
             await asyncio.wait_for(ev.wait(), timeout=timeout)
-            return self._download_results.get(target, (False, "unknown"))
+            result = self._download_results.get(target, (False, "unknown"))
+            return result
         except asyncio.TimeoutError:
             return (False, f"Download timed out after {timeout}s")
         finally:
@@ -805,6 +806,10 @@ class AsyncDCClient:
 
     def set_setting(self, name: str, value: str) -> None:
         self._sync_client.set_setting(name, value)
+
+    def start_networking(self) -> None:
+        """Rebind incoming connection listeners and update hub info."""
+        self._sync_client.start_networking()
 
     # ------------------------------------------------------------------
     # Transfers & Hashing

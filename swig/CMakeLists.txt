@@ -57,8 +57,20 @@ else()
     set_target_properties(dc_core PROPERTIES SUFFIX ".so")
 endif()
 
-# Ensure the output directory and Python source files exist in build tree
-add_custom_command(TARGET dc_core POST_BUILD
+# ---------------------------------------------------------------------------
+# Copy pure-Python source files to the build tree so tests can find them.
+# Uses a stamp-file custom command that re-runs when any .py source changes.
+# ---------------------------------------------------------------------------
+set(_PY_SRCS
+    ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/__init__.py
+    ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/dc_client.py
+    ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/async_client.py
+)
+set(_PY_STAMP ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/.py_copy_stamp)
+
+add_custom_command(
+    OUTPUT ${_PY_STAMP}
+    DEPENDS ${_PY_SRCS}
     COMMAND ${CMAKE_COMMAND} -E make_directory
         ${CMAKE_BINARY_DIR}/python/eiskaltdcpp
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -70,6 +82,15 @@ add_custom_command(TARGET dc_core POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/async_client.py
         ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/async_client.py
+    COMMAND ${CMAKE_COMMAND} -E touch ${_PY_STAMP}
+    COMMENT "Syncing Python sources to build tree"
+)
+add_custom_target(sync_python_sources ALL DEPENDS ${_PY_STAMP})
+add_dependencies(dc_core sync_python_sources)
+
+# Copy SWIG-generated .so and dc_core.py (POST_BUILD, since they
+# only exist after the SWIG compile/link step)
+add_custom_command(TARGET dc_core POST_BUILD
     COMMENT "SWIG Python module built: dc_core"
 )
 

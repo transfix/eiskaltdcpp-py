@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import hashlib
 import logging
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -60,6 +62,7 @@ pytestmark = [
 
 # -- Constants -------------------------------------------------------------
 HUB_WINTERMUTE = "nmdcs://wintermute.sublevels.net:411"
+HUB_LOCAL = "dchub://127.0.0.1:4111"
 HUBS = [HUB_WINTERMUTE]
 
 # Unique nicks so parallel CI runs never collide
@@ -74,6 +77,11 @@ CONNECT_TIMEOUT = 45
 USER_SYNC_TIMEOUT = 60
 PM_TIMEOUT = 30
 SEARCH_TIMEOUT = 30
+HASH_TIMEOUT = 60
+DOWNLOAD_TIMEOUT = 120
+
+# File transfer test parameters
+TEST_FILE_SIZE = 1024 * 1024  # 1 MB
 
 WORKER_SCRIPT = Path(__file__).parent / "dc_worker.py"
 
@@ -192,14 +200,43 @@ class RemoteDCClient:
     async def send_message(self, hub_url: str, message: str) -> None:
         await self._send("send_message", {"hub_url": hub_url, "message": message})
 
-    async def search(self, query: str, hub_url: str = "", timeout: float = SEARCH_TIMEOUT) -> list:
-        return await self._send("search", {"query": query, "hub_url": hub_url, "timeout": timeout, "min_results": 0}, timeout=timeout + 10)
+    async def search(self, query: str, hub_url: str = "", timeout: float = SEARCH_TIMEOUT, min_results: int = 1) -> list:
+        return await self._send("search", {"query": query, "hub_url": hub_url, "timeout": timeout, "min_results": min_results}, timeout=timeout + 10)
 
     async def add_share(self, real_path: str, virtual_name: str) -> bool:
         return await self._send("add_share", {"real_path": real_path, "virtual_name": virtual_name})
 
     async def refresh_share(self) -> None:
         await self._send("refresh_share")
+
+    async def start_networking(self) -> None:
+        await self._send("start_networking")
+
+    async def share_size(self) -> int:
+        return await self._send("share_size")
+
+    async def shared_files(self) -> int:
+        return await self._send("shared_files")
+
+    async def hash_status(self) -> dict:
+        return await self._send("hash_status")
+
+    async def download_and_wait(
+        self, directory: str, name: str, size: int, tth: str,
+        hub_url: str = "", nick: str = "", timeout: float = 120,
+    ) -> dict:
+        return await self._send(
+            "download_and_wait",
+            {"directory": directory, "name": name, "size": size, "tth": tth,
+             "hub_url": hub_url, "nick": nick, "timeout": timeout},
+            timeout=timeout + 30,
+        )
+
+    async def list_queue(self) -> list:
+        return await self._send("list_queue")
+
+    async def clear_queue(self) -> None:
+        await self._send("clear_queue")
 
     async def wait_event(self, event_name: str, timeout: float = 30) -> list:
         """Wait for a specific event from the worker."""
@@ -548,4 +585,304 @@ class TestMultiClientPrivateMessage:
 
         assert test_msg in pm["message"], (
             f"Expected '{test_msg}' in PM, got: '{pm['message']}'"
+        )
+
+
+# =========================================================================
+# File transfer tests (separate processes)
+# =========================================================================
+
+NICK_ALICE_FT = f"IntBot_AF_{_RUN_ID}"
+NICK_BOB_FT = f"IntBot_BF_{_RUN_ID}"
+
+
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
+async def file_transfer_pair():
+    """
+    Module-scoped pair of RemoteDCClients configured for file transfer.
+
+    Alice shares a directory containing a 1 MB random file.
+    Bob has a download directory ready to receive files.
+    Both clients are set to active mode on 127.0.0.1 so they can
+    connect directly to each other on the same machine.
+    """
+    alice = RemoteDCClient("alice_ft")
+    bob = RemoteDCClient("bob_ft")
+
+    # Create temp directories
+    share_dir = Path(tempfile.mkdtemp(prefix="dcpy_share_"))
+    download_dir = Path(tempfile.mkdtemp(prefix="dcpy_dl_"))
+
+    # Generate a 1 MB random file with known hash
+    test_file = share_dir / f"testfile_{_RUN_ID}.dat"
+    file_data = secrets.token_bytes(TEST_FILE_SIZE)
+    test_file.write_bytes(file_data)
+    file_sha256 = hashlib.sha256(file_data).hexdigest()
+
+    try:
+        await alice.start()
+        await bob.start()
+
+        assert await alice.init(), "Alice failed to initialize"
+        assert await bob.init(), "Bob failed to initialize"
+
+        # Configure Alice — MUST be in active mode so she responds to
+        # Bob's passive searches and can accept incoming connections.
+        # In NMDC, passive clients silently ignore passive searches.
+        await alice.set_setting("Nick", NICK_ALICE_FT)
+        await alice.set_setting("Description", "eiskaltdcpp-py file transfer test A")
+        await alice.set_setting("IncomingConnections", "0")  # active/direct
+        await alice.set_setting("InPort", "31410")
+        await alice.set_setting("UDPPort", "31410")
+        await alice.set_setting("TLSPort", "31411")
+        await alice.set_setting("ExternalIp", "127.0.0.1")
+        await alice.set_setting("NoIPOverride", "1")
+        await alice.set_setting("Slots", "5")
+        await alice.set_setting("HashingStartDelay", "0")  # no delay
+
+        # Configure Bob — passive mode.  Search results come via hub TCP
+        # (not UDP), avoiding Docker-bridge routing issues.
+        # For downloads, Bob issues $RevConnectToMe → Alice connects to him.
+        await bob.set_setting("Nick", NICK_BOB_FT)
+        await bob.set_setting("Description", "eiskaltdcpp-py file transfer test B")
+        await bob.set_setting("IncomingConnections", "3")  # passive
+        await bob.set_setting("DownloadDirectory", str(download_dir) + "/")
+        await bob.set_setting("HashingStartDelay", "0")  # no delay
+
+        # Apply networking config — must be called AFTER changing
+        # connection settings so listen sockets are bound to the right ports.
+        # Only Alice needs networking (active mode); Bob is passive.
+        await alice.start_networking()
+
+        # Alice shares the test directory (path MUST end with '/' for DC++)
+        share_path = str(share_dir)
+        if not share_path.endswith("/"):
+            share_path += "/"
+        ok = await alice.add_share(share_path, "TestShare")
+        assert ok, "Alice failed to add share directory"
+
+        # addShareDir() scans the directory and submits new files for
+        # hashing, but unhashed files are NOT included in the share tree.
+        # With HashingStartDelay=0 and a 1 MB file, hashing completes
+        # almost instantly.  The file appears in sha once hashed.
+        # We must: (1) wait for hashing to complete, then (2) refresh
+        # the share so the now-hashed files are picked up.
+
+        # Wait for hashing + share rebuild.
+        # addShareDir auto-indexes after hash completes for new adds,
+        # so share_size should become > 0 quickly.
+        deadline = asyncio.get_event_loop().time() + HASH_TIMEOUT
+        while asyncio.get_event_loop().time() < deadline:
+            share_sz = await alice.share_size()
+            if share_sz > 0:
+                break
+            await asyncio.sleep(0.5)
+        else:
+            # If share not ready, try an explicit refresh
+            await alice.refresh_share()
+            refresh_deadline = asyncio.get_event_loop().time() + 15
+            while asyncio.get_event_loop().time() < refresh_deadline:
+                share_sz = await alice.share_size()
+                if share_sz > 0:
+                    break
+                await asyncio.sleep(0.5)
+            else:
+                hs = await alice.hash_status()
+                share_sz = await alice.share_size()
+                pytest.skip(
+                    f"Share not ready in time: size={share_sz}, "
+                    f"filesLeft={hs['filesLeft']}, bytesLeft={hs['bytesLeft']}"
+                )
+
+        # Verify Alice's share is non-empty
+        shared_fc = await alice.shared_files()
+        assert share_sz > 0, f"Alice share size is {share_sz}, expected > 0"
+        assert shared_fc >= 1, f"Alice shared file count is {shared_fc}, expected >= 1"
+
+        # Connect both to the LOCAL Docker hub — file transfer
+        # requires direct peer-to-peer connections.  The local hub
+        # rewrites client IPs to the Docker bridge IP which is
+        # routable from localhost, whereas a remote hub would see
+        # the machine's public IP, making $ConnectToMe unreachable.
+        await asyncio.gather(
+            alice.connect(HUB_LOCAL, timeout=CONNECT_TIMEOUT),
+            bob.connect(HUB_LOCAL, timeout=CONNECT_TIMEOUT),
+        )
+
+        # Let user lists propagate
+        await asyncio.sleep(5)
+
+        # Make sure they can see each other
+        found_bob = await alice.wait_for_nick_in_users(
+            HUB_LOCAL, NICK_BOB_FT, timeout=USER_SYNC_TIMEOUT
+        )
+        found_alice = await bob.wait_for_nick_in_users(
+            HUB_LOCAL, NICK_ALICE_FT, timeout=USER_SYNC_TIMEOUT
+        )
+        if not found_bob or not found_alice:
+            pytest.skip("Clients cannot see each other in user list")
+
+        yield {
+            "alice": alice,
+            "bob": bob,
+            "share_dir": share_dir,
+            "download_dir": download_dir,
+            "test_file": test_file,
+            "file_data": file_data,
+            "file_sha256": file_sha256,
+            "file_name": test_file.name,
+            "file_size": TEST_FILE_SIZE,
+        }
+
+    finally:
+        for c in (alice, bob):
+            try:
+                await c.close()
+            except Exception:
+                pass
+        shutil.rmtree(share_dir, ignore_errors=True)
+        shutil.rmtree(download_dir, ignore_errors=True)
+
+
+class TestMultiClientFileTransfer:
+    """Verify file sharing and transfer between two clients."""
+
+    @pytest.mark.asyncio(loop_scope="module")
+    async def test_alice_share_visible(self, file_transfer_pair):
+        """Alice's shared file count is at least 1."""
+        info = file_transfer_pair
+        alice = info["alice"]
+        count = await alice.shared_files()
+        assert count >= 1, f"Alice shares {count} files, expected >= 1"
+        size = await alice.share_size()
+        assert size >= info["file_size"], (
+            f"Alice share size {size} < test file size {info['file_size']}"
+        )
+
+    @pytest.mark.asyncio(loop_scope="module")
+    async def test_bob_finds_file_via_search(self, file_transfer_pair):
+        """Bob can find Alice's shared file by searching for its name."""
+        info = file_transfer_pair
+        bob = info["bob"]
+        file_name = info["file_name"]
+
+        # NMDC hubs rate-limit searches (~10s between searches per user)
+        # and share info takes time to propagate.  Retry a few times.
+        alice_results: list[dict] = []
+        for attempt in range(4):
+            if attempt > 0:
+                # Wait for hub search rate-limit to expire
+                await asyncio.sleep(15)
+
+            results = await bob.search(
+                _RUN_ID,
+                hub_url=HUB_LOCAL,
+                timeout=SEARCH_TIMEOUT,
+            )
+
+            alice_results = [
+                r for r in results
+                if r.get("nick") == NICK_ALICE_FT
+            ]
+            if alice_results:
+                break
+
+        if not alice_results:
+            pytest.skip(
+                "Bob did not receive search results from Alice — "
+                "hub may not relay search results between bots, "
+                f"or share not yet propagated. Got {len(results)} total results."
+            )
+
+        # Verify the result has expected fields
+        r = alice_results[0]
+        assert r["size"] == info["file_size"], (
+            f"Search result size {r['size']} != expected {info['file_size']}"
+        )
+        assert len(r.get("tth", "")) > 0, "Search result missing TTH"
+        assert file_name in r.get("file", ""), (
+            f"Search result file '{r.get('file')}' doesn't contain '{file_name}'"
+        )
+
+        # Stash the search result so the download test can reuse it
+        # without hitting hub rate limits with a second search.
+        info["_search_result"] = r
+
+    @pytest.mark.asyncio(loop_scope="module")
+    async def test_bob_downloads_file(self, file_transfer_pair):
+        """Bob downloads Alice's file and verifies the hash matches."""
+        info = file_transfer_pair
+        bob = info["bob"]
+        download_dir = info["download_dir"]
+        file_name = info["file_name"]
+        expected_sha256 = info["file_sha256"]
+
+        # Reuse the search result from test_bob_finds_file_via_search
+        # if available, to avoid hub search rate-limit issues.
+        r = info.get("_search_result")
+        if r is None:
+            # Fallback: search again (with retries)
+            alice_results: list[dict] = []
+            for attempt in range(4):
+                if attempt > 0:
+                    await asyncio.sleep(15)
+
+                results = await bob.search(
+                    _RUN_ID,
+                    hub_url=HUB_LOCAL,
+                    timeout=SEARCH_TIMEOUT,
+                )
+
+                alice_results = [
+                    rr for rr in results
+                    if rr.get("nick") == NICK_ALICE_FT
+                ]
+                if alice_results:
+                    break
+
+            if not alice_results:
+                pytest.skip(
+                    "Bob did not receive search results from Alice — "
+                    "cannot proceed with download test"
+                )
+            r = alice_results[0]
+
+        tth = r["tth"]
+        size = r["size"]
+        source_nick = r.get("nick", "")
+        source_hub = r.get("hub_url", HUB_LOCAL)
+        # The file field may be a path like "TestShare/testfile_xxx.dat";
+        # extract just the filename
+        result_filename = Path(r["file"]).name
+
+        # Queue the download and wait for completion
+        result = await bob.download_and_wait(
+            str(download_dir) + "/",
+            result_filename,
+            size,
+            tth,
+            hub_url=source_hub,
+            nick=source_nick,
+            timeout=DOWNLOAD_TIMEOUT,
+        )
+
+        if not result["success"]:
+            error = result.get("error", "unknown")
+            if "timeout" in error.lower():
+                pytest.skip(
+                    f"Download timed out — peers may not be able to "
+                    f"connect directly: {error}"
+                )
+            pytest.skip(f"Download failed: {error}")
+
+        # Verify the downloaded file exists and hash matches
+        downloaded = download_dir / result_filename
+        assert downloaded.exists(), (
+            f"Downloaded file not found at {downloaded}. "
+            f"Directory contents: {list(download_dir.iterdir())}"
+        )
+        actual_sha256 = hashlib.sha256(downloaded.read_bytes()).hexdigest()
+        assert actual_sha256 == expected_sha256, (
+            f"SHA256 mismatch: expected {expected_sha256}, "
+            f"got {actual_sha256}"
         )

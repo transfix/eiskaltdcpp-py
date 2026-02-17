@@ -109,6 +109,20 @@ class DCWorker:
             return self._cmd_add_share(args)
         elif cmd == "refresh_share":
             return self._cmd_refresh_share()
+        elif cmd == "start_networking":
+            return self._cmd_start_networking()
+        elif cmd == "share_size":
+            return self._cmd_share_size()
+        elif cmd == "shared_files":
+            return self._cmd_shared_files()
+        elif cmd == "hash_status":
+            return self._cmd_hash_status()
+        elif cmd == "download_and_wait":
+            return await self._cmd_download_and_wait(args)
+        elif cmd == "list_queue":
+            return self._cmd_list_queue()
+        elif cmd == "clear_queue":
+            return self._cmd_clear_queue()
         elif cmd == "shutdown":
             return await self._cmd_shutdown()
         elif cmd == "ping":
@@ -133,7 +147,9 @@ class DCWorker:
             for event_name in [
                 "hub_connected", "hub_disconnected", "chat_message",
                 "private_message", "user_connected", "user_disconnected",
-                "search_result",
+                "search_result", "download_starting", "download_complete",
+                "download_failed", "upload_starting", "upload_complete",
+                "queue_item_finished", "hash_progress",
             ]:
                 self.client.on(event_name, self._make_forwarder(event_name))
 
@@ -200,7 +216,7 @@ class DCWorker:
 
     async def _cmd_search(self, args: dict) -> list:
         timeout = args.get("timeout", 30)
-        min_results = args.get("min_results", 0)
+        min_results = args.get("min_results", 1)
         results = await self.client.search_and_wait(
             args["query"],
             hub_url=args.get("hub_url", ""),
@@ -214,6 +230,39 @@ class DCWorker:
 
     def _cmd_refresh_share(self) -> None:
         self.client.refresh_share()
+
+    def _cmd_start_networking(self) -> None:
+        self.client.start_networking()
+
+    def _cmd_share_size(self) -> int:
+        return self.client.share_size
+
+    def _cmd_shared_files(self) -> int:
+        return self.client.shared_files
+
+    def _cmd_hash_status(self) -> dict:
+        hs = self.client.hash_status
+        return {
+            "currentFile": hs.currentFile,
+            "filesLeft": hs.filesLeft,
+            "bytesLeft": hs.bytesLeft,
+        }
+
+    async def _cmd_download_and_wait(self, args: dict) -> dict:
+        timeout = args.get("timeout", 120)
+        success, error = await self.client.download_and_wait(
+            args["directory"], args["name"], args["size"], args["tth"],
+            hub_url=args.get("hub_url", ""),
+            nick=args.get("nick", ""),
+            timeout=timeout,
+        )
+        return {"success": success, "error": error}
+
+    def _cmd_list_queue(self) -> list:
+        return self.client.list_queue()
+
+    def _cmd_clear_queue(self) -> None:
+        self.client.clear_queue()
 
     async def _cmd_shutdown(self) -> None:
         if self.client:

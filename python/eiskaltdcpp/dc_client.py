@@ -404,9 +404,11 @@ class DCClient:
         name: str,
         size: int,
         tth: str,
+        hub_url: str = "",
+        nick: str = "",
     ) -> bool:
         """Add a file to the download queue."""
-        return self._bridge.addToQueue(directory, name, size, tth)
+        return self._bridge.addToQueue(directory, name, size, tth, hub_url, nick)
 
     def download_magnet(
         self, magnet: str, download_dir: str = ""
@@ -493,7 +495,14 @@ class DCClient:
     # ------------------------------------------------------------------
 
     def add_share(self, real_path: str, virtual_name: str) -> bool:
-        """Add a directory to share."""
+        """Add a directory to share.
+
+        The path must end with a path separator for DC++ to construct
+        correct file paths when scanning.  This method appends one
+        automatically if it is missing.
+        """
+        if real_path and not real_path.endswith("/"):
+            real_path += "/"
         return self._bridge.addShareDir(real_path, virtual_name)
 
     def remove_share(self, real_path: str) -> bool:
@@ -559,6 +568,15 @@ class DCClient:
     def reload_config(self) -> None:
         """Reload configuration from disk."""
         self._bridge.reloadConfig()
+
+    def start_networking(self) -> None:
+        """Rebind incoming connection listeners and update hub info.
+
+        Call this after changing connection settings (IncomingConnections,
+        InPort, ExternalIp, etc.) to apply the new networking
+        configuration.  Automatically called during ``initialize()``.
+        """
+        self._bridge.startNetworking()
 
     # ------------------------------------------------------------------
     # Context manager

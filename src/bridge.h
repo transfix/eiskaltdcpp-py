@@ -165,7 +165,9 @@ public:
     bool addToQueue(const std::string& directory,
                     const std::string& name,
                     int64_t size,
-                    const std::string& tth);
+                    const std::string& tth,
+                    const std::string& hubUrl = "",
+                    const std::string& nick = "");
 
     /// Add a magnet link.
     bool addMagnet(const std::string& magnetLink,
@@ -290,6 +292,14 @@ public:
     /// Get libeiskaltdcpp version string.
     static std::string getVersion();
 
+    // =====================================================================
+    // Networking
+    // =====================================================================
+
+    /// Apply connection settings and open listen sockets.
+    /// Must be called after changing IncomingConnections / InPort / etc.
+    void startNetworking();
+
     // BridgeListeners needs access to hub data for stashing chat/results
     friend class BridgeListeners;
 
@@ -318,7 +328,6 @@ private:
     // Internal helpers
     HubData* findHub(const std::string& url);
     dcpp::Client* findClient(const std::string& url);
-    void startNetworking();
 
     // Maximum chat history lines per hub
     static const size_t MAX_CHAT_LINES = 100;
