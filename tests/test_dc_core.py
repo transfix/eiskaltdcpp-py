@@ -10,6 +10,7 @@ Concurrency-safe: all tests use unique temporary directories via pytest's
 tmp_path fixture. No hardcoded paths or shared filesystem state, so
 multiple test runs can execute in parallel on the same machine.
 """
+import asyncio
 import os
 import sys
 import tempfile
@@ -19,6 +20,7 @@ from pathlib import Path
 from typing import List
 
 import pytest
+import pytest_asyncio
 
 # Add build directory to path for SWIG module
 BUILD_DIR = Path(__file__).parent.parent / "build" / "python"
@@ -606,4 +608,370 @@ class TestAsyncDCClient:
         client = AsyncDCClient(str(unique_config_dir))
         stream = client.events()
         assert stream is not None
+
+
+# ============================================================================
+# Async event dispatch & concurrency tests
+# ============================================================================
+
+class TestAsyncEventDispatch:
+    """Tests for the async event dispatch machinery.
+
+    These test the internal event dispatch, handler invocation, and
+    EventStream functionality without needing a live hub connection.
+    """
+
+    async def test_sync_handler_dispatched_from_loop(self):
+        """A sync handler registered with .on() is invoked via _dispatch_event."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient("")
+
+        received = []
+
+        @client.on("status_message")
+        def handler(hub_url, message):
+            received.append((hub_url, message))
+
+        # Simulate the C++ callback dispatching an event in the loop
+        client._run_handlers("status_message", ("dchub://test:411", "hello"))
+
+        assert len(received) == 1
+        assert received[0] == ("dchub://test:411", "hello")
+
+    async def test_async_handler_dispatched(self):
+        """An async handler is scheduled as a coroutine task."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient("")
+
+        received = asyncio.Event()
+        captured = {}
+
+        @client.on("status_message")
+        async def handler(hub_url, message):
+            captured["hub"] = hub_url
+            captured["msg"] = message
+            received.set()
+
+        client._run_handlers("status_message", ("dchub://test:411", "async-hello"))
+
+        # The async handler is scheduled as a task — give it a tick to run
+        await asyncio.wait_for(received.wait(), timeout=2.0)
+        assert captured["hub"] == "dchub://test:411"
+        assert captured["msg"] == "async-hello"
+
+    async def test_multiple_handlers_all_called(self):
+        """Multiple handlers on the same event all get invoked."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient("")
+
+        results = []
+
+        @client.on("user_connected")
+        def h1(hub, nick):
+            results.append(("h1", nick))
+
+        @client.on("user_connected")
+        def h2(hub, nick):
+            results.append(("h2", nick))
+
+        client._run_handlers("user_connected", ("dchub://test:411", "Alice"))
+
+        assert ("h1", "Alice") in results
+        assert ("h2", "Alice") in results
+
+    async def test_handler_exception_does_not_crash(self):
+        """A handler that raises doesn't prevent other handlers from running."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient("")
+
+        results = []
+
+        @client.on("user_connected")
+        def bad_handler(hub, nick):
+            raise RuntimeError("intentional failure")
+
+        @client.on("user_connected")
+        def good_handler(hub, nick):
+            results.append(nick)
+
+        # Should not raise
+        client._run_handlers("user_connected", ("dchub://test:411", "Bob"))
+        assert "Bob" in results
+
+    async def test_off_prevents_handler_from_firing(self):
+        """off() prevents a handler from being called."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient("")
+
+        results = []
+
+        def handler(hub, nick):
+            results.append(nick)
+
+        client.on("user_connected", handler)
+        client.off("user_connected", handler)
+
+        client._run_handlers("user_connected", ("hub", "Alice"))
+        assert len(results) == 0
+
+    async def test_off_nonexistent_handler_is_silent(self):
+        """off() with an unregistered handler doesn't raise."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient("")
+        client.off("user_connected", lambda h, n: None)  # no-op
+
+    async def test_event_stream_receives_events(self):
+        """EventStream yields events dispatched via _run_handlers."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient("")
+
+        stream = client.events()
+        client._run_handlers("status_message", ("hub", "test-msg"))
+
+        event_name, args = await asyncio.wait_for(
+            stream.__anext__(), timeout=2.0
+        )
+        assert event_name == "status_message"
+        assert args == ("hub", "test-msg")
+        await stream.close()
+
+    async def test_event_stream_multiple_events(self):
+        """EventStream yields multiple events in order."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient("")
+
+        stream = client.events()
+        client._run_handlers("user_connected", ("hub", "Alice"))
+        client._run_handlers("user_connected", ("hub", "Bob"))
+
+        e1_name, e1_args = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
+        e2_name, e2_args = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
+
+        assert e1_args[1] == "Alice"
+        assert e2_args[1] == "Bob"
+        await stream.close()
+
+    async def test_event_stream_close_unsubscribes(self):
+        """After close(), the stream's queue is removed from the registry."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient("")
+
+        stream = client.events()
+        assert len(client._event_queues) == 1
+        await stream.close()
+        assert len(client._event_queues) == 0
+
+    async def test_event_stream_as_async_for(self):
+        """EventStream works with 'async for'."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient("")
+
+        stream = client.events()
+        client._run_handlers("chat_message", ("hub", "nick", "hi", False))
+        client._run_handlers("chat_message", ("hub", "nick", "bye", False))
+
+        collected = []
+
+        async def drain():
+            async for name, args in stream:
+                collected.append(args[2])  # message text
+                if len(collected) >= 2:
+                    break
+
+        await asyncio.wait_for(drain(), timeout=2.0)
+        assert collected == ["hi", "bye"]
+        await stream.close()
+
+    async def test_multiple_event_streams(self):
+        """Multiple EventStreams each receive all events independently."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient("")
+
+        s1 = client.events()
+        s2 = client.events()
+
+        client._run_handlers("status_message", ("hub", "msg1"))
+
+        e1_name, e1_args = await asyncio.wait_for(s1.__anext__(), timeout=2.0)
+        e2_name, e2_args = await asyncio.wait_for(s2.__anext__(), timeout=2.0)
+
+        assert e1_args[1] == "msg1"
+        assert e2_args[1] == "msg1"
+
+        await s1.close()
+        await s2.close()
+
+    # -- Connect / disconnect event waits ----------------------------------
+
+    async def test_wait_connected_event_signaling(self):
+        """wait_connected() returns when the connect event is signaled."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient("")
+
+        hub_url = "dchub://fake:411"
+
+        # Simulate a pending connect wait
+        ev = asyncio.Event()
+        client._connect_events[hub_url] = ev
+
+        # Mock is_connected to return True when checked after signal
+        original_is_connected = client._sync_client.is_connected
+        client._sync_client.is_connected = lambda url: True
+
+        async def fire_later():
+            await asyncio.sleep(0.1)
+            ev.set()
+
+        asyncio.create_task(fire_later())
+
+        # Should complete within timeout
+        await asyncio.wait_for(ev.wait(), timeout=2.0)
+        assert ev.is_set()
+
+        # Restore
+        client._sync_client.is_connected = original_is_connected
+        client._connect_events.pop(hub_url, None)
+
+    async def test_wait_connected_already_connected(self):
+        """wait_connected() returns immediately if already connected."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient("")
+
+        hub_url = "dchub://fake:411"
+
+        # Mock is_connected
+        client._sync_client.is_connected = lambda url: True
+        await client.wait_connected(hub_url, timeout=1.0)
+        # Should return without waiting
+
+    async def test_wait_disconnected_already_disconnected(self):
+        """wait_disconnected() returns immediately if not connected."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient("")
+
+        hub_url = "dchub://fake:411"
+        client._sync_client.is_connected = lambda url: False
+        await client.wait_disconnected(hub_url, timeout=1.0)
+
+    # -- PM queue ----------------------------------------------------------
+
+    async def test_pm_queue_receives_messages(self):
+        """Private messages are enqueued and can be awaited via wait_pm."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient("")
+
+        # Simulate the callback wiring pushing a PM to the queue
+        client._pm_queue.put_nowait(
+            ("dchub://hub:411", "Alice", "Bot", "hello bot")
+        )
+
+        result = await asyncio.wait_for(
+            client.wait_pm(timeout=2.0), timeout=3.0
+        )
+        assert result == ("dchub://hub:411", "Alice", "Bot", "hello bot")
+
+    async def test_pm_queue_filters_by_nick(self):
+        """wait_pm(from_nick=...) only returns PMs from that nick."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient("")
+
+        client._pm_queue.put_nowait(("hub", "Eve", "Bot", "ignore me"))
+        client._pm_queue.put_nowait(("hub", "Alice", "Bot", "pick me"))
+
+        result = await asyncio.wait_for(
+            client.wait_pm(from_nick="Alice", timeout=2.0), timeout=3.0
+        )
+        assert result[1] == "Alice"
+        assert result[3] == "pick me"
+
+    async def test_pm_queue_timeout_raises(self):
+        """wait_pm raises TimeoutError when no PM arrives."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient("")
+
+        with pytest.raises(asyncio.TimeoutError):
+            await client.wait_pm(timeout=0.1)
+
+    # -- Search queue ------------------------------------------------------
+
+    async def test_search_queue_receives_results(self):
+        """Search results pushed via _run_handlers show up in _search_queue."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient("")
+
+        # Simulate a search result arriving via the callback
+        result_dict = {
+            "hub_url": "hub", "file": "test.txt", "size": 42,
+            "freeSlots": 3, "totalSlots": 5, "tth": "ABCDE",
+            "nick": "Alice", "isDirectory": False,
+        }
+        client._search_queue.put_nowait(result_dict)
+
+        r = await asyncio.wait_for(
+            client._search_queue.get(), timeout=2.0
+        )
+        assert r["file"] == "test.txt"
+        assert r["nick"] == "Alice"
+
+    # -- Download event tracking -------------------------------------------
+
+    async def test_download_event_tracking(self):
+        """download_and_wait event tracking signals on queue_item_finished."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient("")
+
+        target = "/tmp/test/file.txt"
+        ev = asyncio.Event()
+        client._download_events[target] = ev
+        client._download_results[target] = (False, "timeout")
+
+        # Simulate queue_item_finished
+        client._download_results[target] = (True, "")
+        ev.set()
+
+        await asyncio.wait_for(ev.wait(), timeout=2.0)
+        success, error = client._download_results[target]
+        assert success is True
+        assert error == ""
+
+        # Cleanup
+        client._download_events.pop(target, None)
+        client._download_results.pop(target, None)
+
+    async def test_download_event_failure_tracking(self):
+        """download_and_wait event tracking signals on download_failed."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient("")
+
+        target = "/tmp/test/fail.txt"
+        ev = asyncio.Event()
+        client._download_events[target] = ev
+        client._download_results[target] = (False, "timeout")
+
+        # Simulate download_failed
+        client._download_results[target] = (False, "No slots available")
+        ev.set()
+
+        await asyncio.wait_for(ev.wait(), timeout=2.0)
+        success, error = client._download_results[target]
+        assert success is False
+        assert "No slots" in error
+
+        client._download_events.pop(target, None)
+        client._download_results.pop(target, None)
+
+
+# ============================================================================
+# Async context manager tests
+# ============================================================================
+
+class TestAsyncContextManager:
+    """Tests for the async with AsyncDCClient() pattern."""
+
+    async def test_context_manager_protocol(self, unique_config_dir):
+        """AsyncDCClient has __aenter__ and __aexit__."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+        assert hasattr(client, "__aenter__")
+        assert hasattr(client, "__aexit__")
 
