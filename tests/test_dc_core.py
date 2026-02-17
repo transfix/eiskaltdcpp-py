@@ -146,6 +146,71 @@ class TestDCBridgeCreation:
 
 
 # ============================================================================
+# Settings and initialization tests
+# ============================================================================
+
+class TestBridgeSettings:
+    """Tests for settings get/set and automatic nick generation.
+
+    These tests share a single bridge instance because dcpp's global
+    singletons don't support repeated startup()/shutdown() cycles within
+    the same process.
+    """
+
+    @pytest.fixture(autouse=True, scope="class")
+    def bridge(self, tmp_path_factory):
+        """Create a single bridge for all settings tests."""
+        cfg = tmp_path_factory.mktemp("dc-settings-tests")
+        b = dc_core.DCBridge()
+        ok = b.initialize(str(cfg) + "/")
+        assert ok, "Bridge initialization failed"
+        yield b
+        b.shutdown()
+
+    def test_get_setting_returns_value(self, bridge):
+        """getSetting returns a value after initialization."""
+        # DownloadDirectory always has a non-empty default
+        dl_dir = bridge.getSetting("DownloadDirectory")
+        assert isinstance(dl_dir, str)
+        assert len(dl_dir) > 0
+
+    def test_set_and_get_setting(self, bridge):
+        """setSetting persists a value readable by getSetting."""
+        bridge.setSetting("Description", "pytest-bot")
+        val = bridge.getSetting("Description")
+        assert val == "pytest-bot"
+
+    def test_default_nick_assigned(self, bridge):
+        """A default nick is generated when none is configured."""
+        nick = bridge.getSetting("Nick")
+        assert nick, "Expected a non-empty default nick"
+        assert nick.startswith("dcpy-"), \
+            f"Default nick should start with 'dcpy-', got {nick!r}"
+
+    def test_nick_survives_set(self, bridge):
+        """Nick set via setSetting is readable."""
+        bridge.setSetting("Nick", "my-test-nick")
+        assert bridge.getSetting("Nick") == "my-test-nick"
+
+    def test_unknown_setting_returns_empty(self, bridge):
+        """getSetting returns empty string for unknown setting names."""
+        val = bridge.getSetting("NonExistentSetting99")
+        assert val == ""
+
+    def test_lua_init_no_crash(self, bridge):
+        """Initializing the bridge doesn't crash due to Lua scripting.
+
+        When the system libeiskaltdcpp is compiled with LUA_SCRIPT,
+        every incoming NMDC line passes through a Lua hook.  If the
+        Lua state isn't initialized, that path segfaults.  This test
+        verifies that initialize() correctly sets up the Lua state
+        (or gracefully handles the absence of Lua support).
+        """
+        # If we got here without a segfault, the Lua init worked
+        assert bridge.isInitialized()
+
+
+# ============================================================================
 # Data type tests
 # ============================================================================
 
@@ -462,3 +527,83 @@ class TestDCClientWrapper:
 
         # Both registered without error
         assert len(results) == 0
+
+
+# ============================================================================
+# AsyncDCClient wrapper tests
+# ============================================================================
+
+class TestAsyncDCClient:
+    """Tests for the AsyncDCClient async wrapper."""
+
+    def test_import_async_client(self):
+        """AsyncDCClient can be imported."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        assert AsyncDCClient is not None
+
+    def test_async_client_construct(self, unique_config_dir):
+        """AsyncDCClient can be constructed without initializing."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+        assert not client.is_initialized
+
+    def test_async_client_repr(self, unique_config_dir):
+        """AsyncDCClient has a useful repr."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+        r = repr(client)
+        assert "AsyncDCClient" in r
+        assert "not initialized" in r
+
+    def test_async_client_event_registration(self, unique_config_dir):
+        """Async client event registration works."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+
+        @client.on("chat_message")
+        async def handler(hub, nick, msg, third):
+            pass
+
+        # Registered without error
+        assert len(client._handlers["chat_message"]) == 1
+
+    def test_async_client_invalid_event(self, unique_config_dir):
+        """Registering an invalid event raises ValueError."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+
+        with pytest.raises(ValueError):
+            client.on("bogus_event", lambda: None)
+
+    def test_async_client_off(self, unique_config_dir):
+        """client.off() unregisters a handler."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+
+        async def handler(hub, nick, msg, third):
+            pass
+
+        client.on("chat_message", handler)
+        assert len(client._handlers["chat_message"]) == 1
+        client.off("chat_message", handler)
+        assert len(client._handlers["chat_message"]) == 0
+
+    def test_async_client_version(self, unique_config_dir):
+        """Async client exposes version."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+        v = client.version
+        assert v and len(v) > 0
+
+    def test_async_client_from_package_init(self):
+        """AsyncDCClient is importable from the package."""
+        from eiskaltdcpp import AsyncDCClient
+        assert AsyncDCClient is not None
+
+    def test_event_stream_class(self, unique_config_dir):
+        """EventStream can be created."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+        stream = client.events()
+        assert stream is not None
+

@@ -51,4 +51,8 @@ BUILD_TESTS = "OFF"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --tb=short"
+addopts = "-v --tb=short -m 'not integration'"
+markers = [
+    "integration: live hub integration tests (require network access)",
+]
+asyncio_mode = "auto"

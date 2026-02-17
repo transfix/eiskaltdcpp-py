@@ -256,6 +256,7 @@ public:
 
     void on(dcpp::ClientListener::UserUpdated, dcpp::Client* c,
             const dcpp::OnlineUser& ou) noexcept override {
+        stashUserUpdate(c->getHubUrl(), ou);
         auto cb = getCallback();
         if (cb) cb->onUserConnected(c->getHubUrl(), ou.getIdentity().getNick());
     }
@@ -263,14 +264,15 @@ public:
     void on(dcpp::ClientListener::UsersUpdated, dcpp::Client* c,
             const dcpp::OnlineUserList& list) noexcept override {
         auto cb = getCallback();
-        if (!cb) return;
         for (auto& ou : list) {
-            cb->onUserUpdated(c->getHubUrl(), ou->getIdentity().getNick());
+            stashUserUpdate(c->getHubUrl(), *ou);
+            if (cb) cb->onUserUpdated(c->getHubUrl(), ou->getIdentity().getNick());
         }
     }
 
     void on(dcpp::ClientListener::UserRemoved, dcpp::Client* c,
             const dcpp::OnlineUser& ou) noexcept override {
+        stashUserRemove(c->getHubUrl(), ou.getIdentity().getNick());
         auto cb = getCallback();
         if (cb) cb->onUserDisconnected(c->getHubUrl(), ou.getIdentity().getNick());
     }
@@ -435,6 +437,14 @@ private:
                    const std::string& text);
 
     void stashSearchResult(const SearchResultInfo& info);
+
+    void stashUserUpdate(const std::string& hubUrl,
+                         const dcpp::OnlineUser& ou);
+
+    void stashUserRemove(const std::string& hubUrl,
+                         const std::string& nick);
+
+    void clearHubUsers(const std::string& hubUrl);
 
     std::mutex m_mutex;
     DCBridge* m_bridge = nullptr;

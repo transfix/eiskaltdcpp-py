@@ -43,12 +43,64 @@
 #endif
 
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
+
+#include <dlfcn.h>   // dlsym — for runtime Lua scripting init
+#include <unistd.h>  // getpid — for default nick generation
 
 using namespace dcpp;
 
 namespace eiskaltdcpp_py {
+
+// =========================================================================
+// Runtime Lua scripting initialization
+// =========================================================================
+// The system libeiskaltdcpp.so may be compiled with LUA_SCRIPT support.
+// When it is, every incoming NMDC line passes through a Lua hook
+// (NmdcHubScriptInstance::onClientMessage) which dereferences a static
+// lua_State* pointer.  If ScriptManager::load() was never called, that
+// pointer is null and the process segfaults.
+//
+// We cannot simply #include <dcpp/ScriptManager.h> because it depends on
+// extra/lunar.h which is not installed by the dev package.  Instead, we
+// resolve the singleton instance pointer and load() method at runtime via
+// dlsym using the Itanium ABI mangled names (stable on Linux/GCC/Clang).
+// =========================================================================
+
+static void initLuaScriptingIfPresent() {
+    // dcpp::ScriptInstance::L  (static protected member — lua_State* pointer)
+    // Mangled: _ZN4dcpp14ScriptInstance1LE
+    void** lua_state_ptr = reinterpret_cast<void**>(
+        dlsym(RTLD_DEFAULT,
+              "_ZN4dcpp14ScriptInstance1LE"));
+    if (!lua_state_ptr)
+        return;   // Not compiled with Lua — nothing to do
+
+    if (*lua_state_ptr)
+        return;   // Already initialized
+
+    // Resolve luaL_newstate and luaL_openlibs from the loaded Lua library
+    using NewStateFn = void* (*)();
+    using OpenLibsFn = void (*)(void*);
+
+    NewStateFn new_state = reinterpret_cast<NewStateFn>(
+        dlsym(RTLD_DEFAULT, "luaL_newstate"));
+    OpenLibsFn open_libs = reinterpret_cast<OpenLibsFn>(
+        dlsym(RTLD_DEFAULT, "luaL_openlibs"));
+
+    if (!new_state || !open_libs)
+        return;
+
+    // Initialize a minimal Lua state so that onClientMessage() doesn't crash
+    // when it calls lua_pushlightuserdata(L, ...) with L == null.
+    void* L = new_state();
+    if (!L) return;
+    open_libs(L);
+
+    *lua_state_ptr = L;
+}
 
 // =========================================================================
 // Startup callback (called by dcpp::startup)
@@ -57,6 +109,15 @@ namespace eiskaltdcpp_py {
 static void startupCallback(void*, const std::string& msg) {
     // Could log this if desired
 }
+
+// =========================================================================
+// Global init guard — dcpp::startup() creates global singletons and must
+// only be called ONCE per process.  A second call would double-construct
+// every manager and hang or crash.
+// =========================================================================
+
+static std::atomic<bool> g_dcppStarted{false};
+static std::mutex        g_dcppStartupMutex;
 
 // =========================================================================
 // DCBridge — Construction / Destruction
@@ -80,6 +141,18 @@ bool DCBridge::initialize(const std::string& configDir) {
     }
 
     std::lock_guard<std::mutex> lock(m_mutex);
+
+    // Prevent a second DCBridge from calling dcpp::startup() in the same
+    // process — the singleton managers already exist and re-constructing
+    // them causes hangs / undefined behaviour.
+    {
+        std::lock_guard<std::mutex> glock(g_dcppStartupMutex);
+        if (g_dcppStarted.load()) {
+            // Core is already running — refuse initialization of a second
+            // bridge instance rather than risking UB.
+            return false;
+        }
+    }
 
     // Set up config directory
     std::string cfgDir = configDir;
@@ -116,6 +189,26 @@ bool DCBridge::initialize(const std::string& configDir) {
     // settings, favorites, certificates, hashing, share refresh, and queue.
     dcpp::startup(startupCallback, nullptr);
 
+    // Mark as globally started (must come after startup() succeeds)
+    g_dcppStarted.store(true);
+
+    // Ensure a nick is set — without one the NMDC handshake sends an empty
+    // $ValidateNick which the hub rejects, leaving connected=false forever.
+    {
+        auto* sm = SettingsManager::getInstance();
+        std::string currentNick = sm->get(SettingsManager::NICK, true);
+        if (currentNick.empty()) {
+            // Generate a default nick: "dcpy-<pid>"
+            std::string defaultNick = "dcpy-" + std::to_string(getpid());
+            sm->set(SettingsManager::NICK, defaultNick);
+        }
+    }
+
+    // Initialize the Lua scripting state if the library was compiled with
+    // Lua support.  Without this, NMDC hub callbacks that pass through the
+    // Lua script layer will crash because the lua_State* is null.
+    initLuaScriptingIfPresent();
+
     // Start the timer (drives periodic events) — not done by startup()
     TimerManager::getInstance()->start();
 
@@ -132,27 +225,37 @@ void DCBridge::shutdown() {
         return;
     }
 
-    std::lock_guard<std::mutex> lock(m_mutex);
-
-    // Unsubscribe from global managers
+    // Unsubscribe from global managers (safe without m_mutex —
+    // these are single-threaded calls that don't touch m_hubs)
     BridgeListeners::getInstance().unsubscribeGlobal();
     BridgeListeners::getInstance().setBridge(nullptr);
     BridgeListeners::getInstance().setCallback(nullptr);
 
-    // Close all file lists
-    for (auto& [id, listing] : m_fileLists) {
-        delete listing;
-    }
-    m_fileLists.clear();
+    // Collect hub clients and file lists under the lock, then release
+    std::vector<Client*> clients;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
 
-    // Disconnect all hubs
-    for (auto& [url, data] : m_hubs) {
-        if (data.client) {
-            data.client->disconnect(true);
-            ClientManager::getInstance()->putClient(data.client);
+        // Close all file lists
+        for (auto& [id, listing] : m_fileLists) {
+            delete listing;
         }
+        m_fileLists.clear();
+
+        // Collect hub clients
+        for (auto& [url, data] : m_hubs) {
+            if (data.client) {
+                clients.push_back(data.client);
+            }
+        }
+        m_hubs.clear();
     }
-    m_hubs.clear();
+
+    // m_mutex released — safe to call into dcpp (avoids ABBA deadlock)
+    for (auto* client : clients) {
+        client->disconnect(true);
+        ClientManager::getInstance()->putClient(client);
+    }
 
     // Shut down core library
     dcpp::shutdown();
@@ -182,11 +285,14 @@ void DCBridge::connectHub(const std::string& url,
                           const std::string& encoding) {
     if (!m_initialized.load()) return;
 
-    std::lock_guard<std::mutex> lock(m_mutex);
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        // Don't connect twice
+        if (m_hubs.count(url) > 0) return;
+    }
 
-    // Don't connect twice
-    if (m_hubs.count(url) > 0) return;
-
+    // m_mutex released — safe to call into dcpp (avoids ABBA deadlock
+    // with ClientManager::cs / NmdcHub::cs held by hub socket threads)
     Client* client = ClientManager::getInstance()->getClient(url);
     if (!client) return;
 
@@ -199,41 +305,59 @@ void DCBridge::connectHub(const std::string& url,
 
     client->connect();
 
-    HubData hd;
-    hd.client = client;
-    m_hubs[url] = std::move(hd);
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        HubData hd;
+        hd.client = client;
+        m_hubs[url] = std::move(hd);
+    }
 }
 
 void DCBridge::disconnectHub(const std::string& url) {
     if (!m_initialized.load()) return;
 
-    std::lock_guard<std::mutex> lock(m_mutex);
+    Client* client = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_hubs.find(url);
+        if (it == m_hubs.end()) return;
+        client = it->second.client;
+        m_hubs.erase(it);
+    }
 
-    auto it = m_hubs.find(url);
-    if (it == m_hubs.end()) return;
-
-    BridgeListeners::getInstance().detach(it->second.client);
-    it->second.client->disconnect(true);
-    ClientManager::getInstance()->putClient(it->second.client);
-    m_hubs.erase(it);
+    // m_mutex released — safe to call into dcpp (avoids ABBA deadlock)
+    if (client) {
+        BridgeListeners::getInstance().detach(client);
+        client->disconnect(true);
+        ClientManager::getInstance()->putClient(client);
+    }
 }
 
 std::vector<HubInfo> DCBridge::listHubs() {
     std::vector<HubInfo> result;
     if (!m_initialized.load()) return result;
 
-    std::lock_guard<std::mutex> lock(m_mutex);
+    // Snapshot the url→client pointers under the lock
+    std::vector<std::pair<std::string, Client*>> snapshot;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        snapshot.reserve(m_hubs.size());
+        for (auto& [url, data] : m_hubs) {
+            snapshot.emplace_back(url, data.client);
+        }
+    }
 
-    for (auto& [url, data] : m_hubs) {
+    // m_mutex released — safe to call dcpp accessors (avoids ABBA deadlock)
+    for (auto& [url, client] : snapshot) {
         HubInfo info;
         info.url = url;
-        if (data.client) {
-            info.name = data.client->getHubName();
-            info.description = data.client->getHubDescription();
-            info.userCount = data.client->getUserCount();
-            info.sharedBytes = data.client->getAvailable();
-            info.connected = data.client->isConnected();
-            info.isOp = data.client->isOp();
+        if (client) {
+            info.name = client->getHubName();
+            info.description = client->getHubDescription();
+            info.userCount = client->getUserCount();
+            info.sharedBytes = client->getAvailable();
+            info.connected = client->isConnected();
+            info.isOp = client->isOp();
         }
         result.push_back(std::move(info));
     }
@@ -256,11 +380,15 @@ void DCBridge::sendMessage(const std::string& hubUrl,
                            const std::string& message) {
     if (!m_initialized.load()) return;
 
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto* client = findClient(hubUrl);
-    if (client) {
-        client->hubMessage(message);
+    Client* client;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        client = findClient(hubUrl);
+        if (!client) return;
     }
+    // m_mutex released — safe to call into dcpp (avoids ABBA deadlock
+    // with NmdcHub::cs held by the hub socket thread)
+    client->hubMessage(message);
 }
 
 void DCBridge::sendPM(const std::string& hubUrl,
@@ -268,11 +396,13 @@ void DCBridge::sendPM(const std::string& hubUrl,
                       const std::string& message) {
     if (!m_initialized.load()) return;
 
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto* client = findClient(hubUrl);
-    if (!client) return;
-
-    // Find the user via CID lookup
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto* client = findClient(hubUrl);
+        if (!client) return;
+    }
+    // m_mutex released — safe to call into dcpp (avoids ABBA deadlock
+    // with NmdcHub::cs / ClientManager::cs held by the hub socket thread)
     UserPtr user = ClientManager::getInstance()->findUser(nick, hubUrl);
     if (user) {
         HintedUser hu(user, hubUrl);
@@ -308,13 +438,13 @@ std::vector<UserInfo> DCBridge::getHubUsers(const std::string& hubUrl) {
     if (!m_initialized.load()) return result;
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    auto* client = findClient(hubUrl);
-    if (!client) return result;
+    auto* hd = findHub(hubUrl);
+    if (!hd) return result;
 
-    // TODO: The dcpp core stores users per-hub inside NmdcHub/AdcHub
-    // private maps, with no public iteration API.  The correct long-term
-    // approach is to maintain a local user map via UserUpdated/UserRemoved
-    // callbacks.  For now, return the user count via HubInfo instead.
+    result.reserve(hd->users.size());
+    for (auto& [nick, ui] : hd->users) {
+        result.push_back(ui);
+    }
     return result;
 }
 
@@ -324,11 +454,13 @@ UserInfo DCBridge::getUserInfo(const std::string& nick,
     ui.nick = nick;
     if (!m_initialized.load()) return ui;
 
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto* client = findClient(hubUrl);
-    if (!client) return ui;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto* client = findClient(hubUrl);
+        if (!client) return ui;
+    }
 
-    // Look up user via CID-based find, then get their identity
+    // m_mutex released — safe to call ClientManager (avoids ABBA deadlock)
     UserPtr user = ClientManager::getInstance()->findUser(nick, hubUrl);
     if (user) {
         Identity id = ClientManager::getInstance()->getOnlineUserIdentity(user);
@@ -352,8 +484,12 @@ bool DCBridge::search(const std::string& query, int fileType,
                       const std::string& hubUrl) {
     if (!m_initialized.load()) return false;
 
-    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!hubUrl.empty()) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (!findClient(hubUrl)) return false;
+    }
 
+    // m_mutex released — safe to call SearchManager (avoids ABBA deadlock)
     auto sm = SearchManager::getInstance();
     auto token = Util::toString(Util::rand());
 
@@ -536,11 +672,13 @@ bool DCBridge::requestFileList(const std::string& hubUrl,
                                bool matchQueue) {
     if (!m_initialized.load()) return false;
 
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto* client = findClient(hubUrl);
-    if (!client) return false;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto* client = findClient(hubUrl);
+        if (!client) return false;
+    }
 
-    // Find user and request file list
+    // m_mutex released — safe to call ClientManager/QueueManager
     UserPtr user = ClientManager::getInstance()->findUser(nick, hubUrl);
     if (user) {
         try {
@@ -805,17 +943,47 @@ void DCBridge::pauseHashing(bool pause) {
 std::string DCBridge::getSetting(const std::string& name) {
     if (!m_initialized.load()) return "";
 
-    // This mirrors the daemon's settingsGetSet
     auto* sm = SettingsManager::getInstance();
-    // Try string settings first, then int
-    // TODO: full name-to-enum mapping
+
+    // Resolve setting name → enum index + type.
+    int n = 0;
+    SettingsManager::Types type{};
+    if (!sm->getType(name.c_str(), n, type))
+        return "";  // unknown setting name
+
+    // Read with useDefault=true so defaults (e.g. DownloadDirectory) are
+    // returned even when the user hasn't explicitly overridden them.
+    if (type == SettingsManager::TYPE_STRING)
+        return sm->get(static_cast<SettingsManager::StrSetting>(n), true);
+    else if (type == SettingsManager::TYPE_INT)
+        return std::to_string(sm->get(static_cast<SettingsManager::IntSetting>(n), true));
+    else if (type == SettingsManager::TYPE_INT64)
+        return std::to_string(sm->get(static_cast<SettingsManager::Int64Setting>(n), true));
+
     return "";
 }
 
 void DCBridge::setSetting(const std::string& name,
                           const std::string& value) {
     if (!m_initialized.load()) return;
-    // TODO: full name-to-enum mapping
+
+    auto* sm = SettingsManager::getInstance();
+
+    int n = 0;
+    SettingsManager::Types type{};
+    if (!sm->getType(name.c_str(), n, type))
+        return;  // unknown setting name
+
+    if (type == SettingsManager::TYPE_STRING)
+        sm->set(static_cast<SettingsManager::StrSetting>(n), value);
+    else if (type == SettingsManager::TYPE_INT)
+        sm->set(static_cast<SettingsManager::IntSetting>(n), std::atoi(value.c_str()));
+    else if (type == SettingsManager::TYPE_INT64)
+        sm->set(static_cast<SettingsManager::Int64Setting>(n),
+                static_cast<int64_t>(std::atoll(value.c_str())));
+
+    // Save to disk so changes persist
+    sm->save();
 }
 
 void DCBridge::reloadConfig() {

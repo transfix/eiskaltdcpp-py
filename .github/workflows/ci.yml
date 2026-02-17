@@ -41,7 +41,8 @@ jobs:
             build-essential \
             cmake swig python3-dev \
             libssl-dev zlib1g-dev libbz2-dev \
-            libeiskaltdcpp-dev
+            libeiskaltdcpp-dev \
+            liblua5.3-dev
 
       - name: Install Python dependencies
         run: |
@@ -64,4 +65,5 @@ jobs:
 
       - name: Run tests (pytest direct)
         run: |
-          PYTHONPATH=build/python python -m pytest tests/ -v --tb=short
+          PYTHONPATH=build/python python -m pytest tests/ -v --tb=short \
+            --ignore=tests/test_integration.py
