@@ -90,16 +90,22 @@ class AsyncDCClient:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    async def initialize(self) -> bool:
-        """Initialize the DC core. Must be called before other operations."""
+    async def initialize(self, *, timeout: float = 60.0) -> bool:
+        """Initialize the DC core. Must be called before other operations.
+
+        Args:
+            timeout: Maximum seconds to wait for C++ initialization.
+                     Prevents hanging if dcpp::startup() blocks.
+        """
         loop = self._ensure_loop()
 
         # Wire up the internal sync client's callbacks to our async dispatch
         self._wire_callbacks()
 
         # initialize() does I/O (disk) so run in executor
-        ok = await loop.run_in_executor(
-            None, self._sync_client.initialize
+        ok = await asyncio.wait_for(
+            loop.run_in_executor(None, self._sync_client.initialize),
+            timeout=timeout,
         )
         return ok
 

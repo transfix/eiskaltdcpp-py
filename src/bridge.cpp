@@ -111,6 +111,15 @@ static void startupCallback(void*, const std::string& msg) {
 }
 
 // =========================================================================
+// Global init guard — dcpp::startup() creates global singletons and must
+// only be called ONCE per process.  A second call would double-construct
+// every manager and hang or crash.
+// =========================================================================
+
+static std::atomic<bool> g_dcppStarted{false};
+static std::mutex        g_dcppStartupMutex;
+
+// =========================================================================
 // DCBridge — Construction / Destruction
 // =========================================================================
 
@@ -132,6 +141,18 @@ bool DCBridge::initialize(const std::string& configDir) {
     }
 
     std::lock_guard<std::mutex> lock(m_mutex);
+
+    // Prevent a second DCBridge from calling dcpp::startup() in the same
+    // process — the singleton managers already exist and re-constructing
+    // them causes hangs / undefined behaviour.
+    {
+        std::lock_guard<std::mutex> glock(g_dcppStartupMutex);
+        if (g_dcppStarted.load()) {
+            // Core is already running — refuse initialization of a second
+            // bridge instance rather than risking UB.
+            return false;
+        }
+    }
 
     // Set up config directory
     std::string cfgDir = configDir;
@@ -167,6 +188,9 @@ bool DCBridge::initialize(const std::string& configDir) {
     // Start the core library — creates all singleton managers, loads
     // settings, favorites, certificates, hashing, share refresh, and queue.
     dcpp::startup(startupCallback, nullptr);
+
+    // Mark as globally started (must come after startup() succeeds)
+    g_dcppStarted.store(true);
 
     // Ensure a nick is set — without one the NMDC handshake sends an empty
     // $ValidateNick which the hub rejects, leaving connected=false forever.
