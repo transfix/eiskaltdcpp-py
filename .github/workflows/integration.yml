@@ -25,7 +25,7 @@ concurrency:
 jobs:
   integration:
     name: Integration tests
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     timeout-minutes: 15
 
     # Allow the job to fail without blocking the PR — network issues
@@ -50,8 +50,8 @@ jobs:
             build-essential \
             cmake swig python3-dev \
             libssl-dev zlib1g-dev libbz2-dev \
-            libeiskaltdcpp-dev \
-            liblua5.3-dev
+            liblua5.3-dev \
+            libpcre2-dev libminiupnpc-dev libidn2-dev
 
       - name: Install Python dependencies
         run: |
@@ -62,6 +62,7 @@ jobs:
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
+            -DUSE_SYSTEM_EISKALTDCPP=OFF \
             -DBUILD_TESTS=ON \
             -DPython3_EXECUTABLE=$(which python)
           cmake --build build -j$(nproc)
