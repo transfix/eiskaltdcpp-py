@@ -23,6 +23,7 @@ jobs:
   integration:
     name: Integration tests
     runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 10
 
     # Allow the job to fail without blocking the PR — network issues
     # with live hubs should not prevent merging.
@@ -46,7 +47,8 @@ jobs:
             build-essential \
             cmake swig python3-dev \
             libssl-dev zlib1g-dev libbz2-dev \
-            libeiskaltdcpp-dev
+            libeiskaltdcpp-dev \
+            liblua5.3-dev
 
       - name: Install Python dependencies
         run: |

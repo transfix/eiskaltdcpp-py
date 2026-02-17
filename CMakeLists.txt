@@ -83,6 +83,24 @@ if(USE_SYSTEM_EISKALTDCPP)
             INTERFACE_INCLUDE_DIRECTORIES "${EISKALTDCPP_INCLUDE_DIR}"
         )
         set(EISKALTDCPP_FOUND TRUE)
+
+        # Detect whether the system library was compiled with Lua scripting.
+        # When LUA_SCRIPT is enabled, Client inherits from ClientScriptInstance
+        # which changes the ABI layout (extra vtable pointer).  Our bridge code
+        # MUST be compiled with the same setting to match member offsets.
+        if(EXISTS "${EISKALTDCPP_INCLUDE_DIR}/dcpp/ScriptManager.h")
+            find_package(Lua 5.2)
+            if(LUA_FOUND)
+                message(STATUS "System libeiskaltdcpp has Lua scripting — enabling LUA_SCRIPT for ABI compat")
+                set(EISKALTDCPP_HAS_LUA TRUE)
+            else()
+                message(WARNING "System libeiskaltdcpp has Lua support but Lua dev headers not found. "
+                                "ABI mismatch may cause crashes!")
+                set(EISKALTDCPP_HAS_LUA FALSE)
+            endif()
+        else()
+            set(EISKALTDCPP_HAS_LUA FALSE)
+        endif()
     endif()
 endif()
 

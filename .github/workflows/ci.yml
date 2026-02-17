@@ -41,7 +41,8 @@ jobs:
             build-essential \
             cmake swig python3-dev \
             libssl-dev zlib1g-dev libbz2-dev \
-            libeiskaltdcpp-dev
+            libeiskaltdcpp-dev \
+            liblua5.3-dev
 
       - name: Install Python dependencies
         run: |

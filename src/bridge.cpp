@@ -46,9 +46,59 @@
 #include <filesystem>
 #include <iostream>
 
+#include <dlfcn.h>   // dlsym — for runtime Lua scripting init
+
 using namespace dcpp;
 
 namespace eiskaltdcpp_py {
+
+// =========================================================================
+// Runtime Lua scripting initialization
+// =========================================================================
+// The system libeiskaltdcpp.so may be compiled with LUA_SCRIPT support.
+// When it is, every incoming NMDC line passes through a Lua hook
+// (NmdcHubScriptInstance::onClientMessage) which dereferences a static
+// lua_State* pointer.  If ScriptManager::load() was never called, that
+// pointer is null and the process segfaults.
+//
+// We cannot simply #include <dcpp/ScriptManager.h> because it depends on
+// extra/lunar.h which is not installed by the dev package.  Instead, we
+// resolve the singleton instance pointer and load() method at runtime via
+// dlsym using the Itanium ABI mangled names (stable on Linux/GCC/Clang).
+// =========================================================================
+
+static void initLuaScriptingIfPresent() {
+    // dcpp::ScriptInstance::L  (static protected member — lua_State* pointer)
+    // Mangled: _ZN4dcpp14ScriptInstance1LE
+    void** lua_state_ptr = reinterpret_cast<void**>(
+        dlsym(RTLD_DEFAULT,
+              "_ZN4dcpp14ScriptInstance1LE"));
+    if (!lua_state_ptr)
+        return;   // Not compiled with Lua — nothing to do
+
+    if (*lua_state_ptr)
+        return;   // Already initialized
+
+    // Resolve luaL_newstate and luaL_openlibs from the loaded Lua library
+    using NewStateFn = void* (*)();
+    using OpenLibsFn = void (*)(void*);
+
+    NewStateFn new_state = reinterpret_cast<NewStateFn>(
+        dlsym(RTLD_DEFAULT, "luaL_newstate"));
+    OpenLibsFn open_libs = reinterpret_cast<OpenLibsFn>(
+        dlsym(RTLD_DEFAULT, "luaL_openlibs"));
+
+    if (!new_state || !open_libs)
+        return;
+
+    // Initialize a minimal Lua state so that onClientMessage() doesn't crash
+    // when it calls lua_pushlightuserdata(L, ...) with L == null.
+    void* L = new_state();
+    if (!L) return;
+    open_libs(L);
+
+    *lua_state_ptr = L;
+}
 
 // =========================================================================
 // Startup callback (called by dcpp::startup)
@@ -115,6 +165,11 @@ bool DCBridge::initialize(const std::string& configDir) {
     // Start the core library — creates all singleton managers, loads
     // settings, favorites, certificates, hashing, share refresh, and queue.
     dcpp::startup(startupCallback, nullptr);
+
+    // Initialize the Lua scripting state if the library was compiled with
+    // Lua support.  Without this, NMDC hub callbacks that pass through the
+    // Lua script layer will crash because the lua_State* is null.
+    initLuaScriptingIfPresent();
 
     // Start the timer (drives periodic events) — not done by startup()
     TimerManager::getInstance()->start();

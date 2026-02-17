@@ -54,3 +54,18 @@ target_link_libraries(eiskaltdcpp_py_bridge
         BZip2::BZip2
         Threads::Threads
 )
+
+# When the system libeiskaltdcpp is compiled with LUA_SCRIPT, the Client
+# class has an extra base class (ClientScriptInstance -> ScriptInstance)
+# which adds a vtable pointer and changes member offsets.  We must compile
+# with the same define to match the ABI.
+if(EISKALTDCPP_HAS_LUA)
+    target_compile_definitions(eiskaltdcpp_py_bridge PRIVATE LUA_SCRIPT)
+    # Lua headers needed by dcpp/ScriptManager.h
+    target_include_directories(eiskaltdcpp_py_bridge PRIVATE ${LUA_INCLUDE_DIR})
+    # Our src/extra/lunar.h stub (ScriptManager.h includes "extra/lunar.h"
+    # which is not installed by libeiskaltdcpp-dev)
+    target_include_directories(eiskaltdcpp_py_bridge PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+endif()
