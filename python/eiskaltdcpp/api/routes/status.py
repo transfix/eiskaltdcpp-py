@@ -5,10 +5,14 @@ GET /api/status         — System status overview (readonly+)
 GET /api/status/transfers — Transfer statistics (readonly+)
 GET /api/status/hashing  — Hashing status (readonly+)
 POST /api/status/hashing/pause — Pause/resume hashing (admin)
+POST /api/shutdown       — Graceful server shutdown (admin)
 GET /api/health          — Health check (public, no auth)
 """
 from __future__ import annotations
 
+import logging
+import os
+import signal
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -139,3 +143,27 @@ async def pause_hashing(
     client.pause_hashing(pause)
     action = "paused" if pause else "resumed"
     return SuccessResponse(message=f"Hashing {action}")
+
+
+logger = logging.getLogger(__name__)
+
+
+@router.post(
+    "/api/shutdown",
+    response_model=SuccessResponse,
+    summary="Graceful server shutdown",
+)
+async def shutdown(
+    _admin: UserRecord = Depends(require_admin),
+) -> SuccessResponse:
+    """Initiate a graceful shutdown of the server process (admin only).
+
+    Sends SIGTERM to the running process, which triggers the daemon's
+    signal handler for a clean shutdown (disconnecting hubs, saving
+    state, stopping the API server).
+    """
+    logger.info("Shutdown requested by admin via API")
+    # Send SIGTERM to ourselves — the daemon/api signal handler
+    # will catch it and perform a graceful shutdown.
+    os.kill(os.getpid(), signal.SIGTERM)
+    return SuccessResponse(message="Shutdown initiated")

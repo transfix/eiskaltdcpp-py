@@ -983,6 +983,26 @@ class TestStatusEndpoints:
         )
         assert resp.status_code == 403
 
+    def test_shutdown_admin(self, app, admin_token):
+        """Admin can trigger shutdown (sends SIGTERM to self)."""
+        import os
+        import signal
+        from unittest.mock import patch
+
+        with patch("os.kill") as mock_kill:
+            resp = app.post("/api/shutdown", headers=auth_header(admin_token))
+            assert resp.status_code == 200
+            assert resp.json()["message"] == "Shutdown initiated"
+            mock_kill.assert_called_once_with(os.getpid(), signal.SIGTERM)
+
+    def test_shutdown_readonly_denied(self, app, readonly_token):
+        resp = app.post("/api/shutdown", headers=auth_header(readonly_token))
+        assert resp.status_code == 403
+
+    def test_shutdown_unauthenticated(self, app):
+        resp = app.post("/api/shutdown")
+        assert resp.status_code == 401
+
 
 # ============================================================================
 # RBAC comprehensive tests
@@ -1010,6 +1030,7 @@ class TestRoleBasedAccess:
         ("POST", "/api/settings/reload", None),
         ("POST", "/api/settings/networking", None),
         ("POST", "/api/status/hashing/pause", None),
+        ("POST", "/api/shutdown", None),
         ("POST", "/api/auth/users", {"username": "x", "password": "password123", "role": "readonly"}),
         ("GET", "/api/auth/users", None),
     ]

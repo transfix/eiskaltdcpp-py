@@ -172,6 +172,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
         <div class="navbar-item has-dropdown is-hoverable">
             <a class="navbar-link"><span class="icon"><i class="fas fa-user-circle"></i></span><span id="nav-username">admin</span></a>
             <div class="navbar-dropdown is-right">
+                <a class="navbar-item" onclick="doShutdown()"><span class="icon"><i class="fas fa-power-off"></i></span><span>Shutdown Server</span></a>
+                <hr class="navbar-divider">
                 <a class="navbar-item" onclick="doLogout()"><span class="icon"><i class="fas fa-sign-out-alt"></i></span><span>Logout</span></a>
             </div>
         </div>
@@ -451,6 +453,17 @@ function doLogout() {
     if (WS) { WS.close(); WS = null; }
     document.getElementById('login-page').style.display = 'flex';
     document.getElementById('app-page').style.display = 'none';
+}
+
+async function doShutdown() {
+    if (!confirm('Are you sure you want to shut down the server?\\nThis will stop the daemon and API.')) return;
+    try {
+        await fetch(API + '/api/shutdown', { method: 'POST', headers: headers() });
+        document.body.innerHTML = '<div style=\"display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;\"><div style=\"text-align:center;\"><h1>Server shutting down</h1><p>The eispy process has been stopped.</p></div></div>';
+    } catch (e) {
+        // Connection reset is expected — server is shutting down
+        document.body.innerHTML = '<div style=\"display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;\"><div style=\"text-align:center;\"><h1>Server shutting down</h1><p>The eispy process has been stopped.</p></div></div>';
+    }
 }
 
 function enterApp() {

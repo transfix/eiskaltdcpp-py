@@ -457,13 +457,21 @@ class TestMultiClientConnection:
         """Both clients see reasonable hub info."""
         alice, bob = alice_and_bob
         for c, label in [(alice, "Alice"), (bob, "Bob")]:
-            hubs = await c.list_hubs()
-            assert len(hubs) >= 1, f"{label}: no hubs"
-            h = hubs[0]
-            assert h["connected"], f"{label}: not connected"
-            assert len(h["name"]) > 0, f"{label}: empty hub name"
-            assert h["userCount"] >= 2, (
-                f"{label}: {h['userCount']} users, expected >=2"
+            # Poll until userCount >= 2 (both clients may still be registering)
+            deadline = asyncio.get_event_loop().time() + USER_SYNC_TIMEOUT
+            user_count = 0
+            while asyncio.get_event_loop().time() < deadline:
+                hubs = await c.list_hubs()
+                assert len(hubs) >= 1, f"{label}: no hubs"
+                h = hubs[0]
+                assert h["connected"], f"{label}: not connected"
+                assert len(h["name"]) > 0, f"{label}: empty hub name"
+                user_count = h["userCount"]
+                if user_count >= 2:
+                    break
+                await asyncio.sleep(1)
+            assert user_count >= 2, (
+                f"{label}: {user_count} users, expected >=2"
             )
 
 
