@@ -667,6 +667,18 @@ class RemoteDCClient:
         except Exception:
             return False
 
+    async def shutdown(self) -> None:
+        """Request a graceful server shutdown (admin only).
+
+        Sends POST /api/shutdown which triggers SIGTERM on the server
+        process for a clean shutdown.
+        """
+        try:
+            await self._post("/api/shutdown")
+        except httpx.RemoteProtocolError:
+            # Server may close connection immediately — that's expected
+            pass
+
     # ---- Event stream ----
 
     def events(self, channels: str = "events") -> RemoteEventStream:

@@ -796,6 +796,17 @@ class TestRemoteDCClientStatus:
         assert result is True
 
     @pytest.mark.asyncio
+    async def test_shutdown(self, client):
+        """shutdown() sends POST /api/shutdown."""
+        import os
+        import signal
+        from unittest.mock import patch
+
+        with patch("os.kill") as mock_kill:
+            await client.shutdown()
+            mock_kill.assert_called_once_with(os.getpid(), signal.SIGTERM)
+
+    @pytest.mark.asyncio
     async def test_get_transfer_stats(self, client):
         stats = await client.get_transfer_stats()
         assert isinstance(stats, TransferStats)
