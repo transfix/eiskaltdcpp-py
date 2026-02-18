@@ -210,6 +210,69 @@ python examples/remote_client.py --url http://localhost:8080 --user admin --pass
 └──────────────────────────────────┘
 ```
 
+## CLI
+
+After installing the package (or with `PYTHONPATH=build/python`), a unified
+`eispy` command is available.  It can launch the DC daemon, the REST
+API, or both — in the foreground (attached) or as a background daemon.
+
+### Subcommands
+
+| Command  | Description |
+|----------|-------------|
+| `daemon` | Launch the DC client daemon (connects to hubs, stays alive) |
+| `api`    | Launch the REST API server (JWT auth, dashboard) |
+| `up`     | Launch **both** daemon + API in a single process |
+| `stop`   | Send SIGTERM to a detached instance (via PID file) |
+| `status` | Check whether a detached instance is running |
+
+### Quick start
+
+```bash
+# Launch the DC daemon attached (stdout/stderr to terminal)
+eispy daemon --hub dchub://hub.example.com:411 --nick MyBot
+
+# Launch the REST API attached
+eispy api --admin-pass s3cret --port 9000
+
+# Launch both daemon + API together (foreground)
+eispy up --hub dchub://hub.example.com:411 --admin-pass s3cret
+
+# Detach any mode with -d  (writes PID file, redirects to log)
+eispy up -d --hub dchub://hub:411 --admin-pass s3cret \
+  --log-file /var/log/eiskaltdcpp.log
+
+# Check status / stop a background instance
+eispy status
+eispy stop
+```
+
+### Environment variables
+
+All options can also be set via environment variables:
+
+| Variable | Option |
+|---|---|
+| `EISKALTDCPP_CONFIG_DIR` | `--config-dir` |
+| `EISKALTDCPP_NICK` | `--nick` |
+| `EISKALTDCPP_PASSWORD` | `--password` |
+| `EISKALTDCPP_HOST` | `--host` |
+| `EISKALTDCPP_PORT` | `--port` |
+| `EISKALTDCPP_ADMIN_USER` | `--admin-user` |
+| `EISKALTDCPP_ADMIN_PASS` | `--admin-pass` |
+| `EISKALTDCPP_JWT_SECRET` | `--jwt-secret` |
+| `EISKALTDCPP_USERS_FILE` | `--users-file` |
+| `EISKALTDCPP_LOG_FILE` | `--log-file` |
+| `EISKALTDCPP_PID_FILE` | `--pid-file` |
+
+### Full option reference
+
+```
+eispy daemon -h
+eispy api -h
+eispy up -h
+```
+
 ## REST API
 
 The project includes a full REST API server that can wrap a running DC client
@@ -406,6 +469,7 @@ eiskaltdcpp-py/
 │       ├── __init__.py         # Package init
 │       ├── dc_client.py        # High-level Python wrapper
 │       ├── async_client.py     # Async wrapper
+│       ├── cli.py              # Unified Click CLI (daemon/api/up/stop/status)
 │       └── api/
 │           ├── __init__.py     # create_app() factory
 │           ├── __main__.py     # CLI: python -m eiskaltdcpp.api
@@ -428,6 +492,7 @@ eiskaltdcpp-py/
 └── tests/
     ├── CMakeLists.txt          # Test configuration
     ├── test_dc_core.py         # SWIG binding tests
+    ├── test_cli.py             # CLI subcommand & option tests
     ├── test_api.py             # REST API endpoint tests
     ├── test_client.py          # RemoteDCClient unit tests
     ├── test_websocket.py       # WebSocket tests

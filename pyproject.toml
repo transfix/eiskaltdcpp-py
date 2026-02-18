@@ -29,6 +29,9 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
+[project.dependencies]
+click = ">=8.0"
+
 [project.optional-dependencies]
 api = [
     "fastapi>=0.104",
@@ -44,6 +47,7 @@ api-test = [
 ]
 
 [project.scripts]
+eispy = "eiskaltdcpp.cli:main"
 eiskaltdcpp-api = "eiskaltdcpp.api.__main__:main"
 
 [project.urls]
