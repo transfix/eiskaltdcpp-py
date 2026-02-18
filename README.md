@@ -435,9 +435,6 @@ async def main():
 
 See [`examples/remote_client.py`](examples/remote_client.py) for a complete
 runnable script.
-│  (dcpp/)                 │  NMDC/ADC, search, transfers, hashing
-└──────────────────────────┘
-```
 
 ## Project structure
 

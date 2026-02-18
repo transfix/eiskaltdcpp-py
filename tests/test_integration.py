@@ -69,6 +69,8 @@ _RUN_ID = uuid.uuid4().hex[:6]
 NICK = f"IntBot_{_RUN_ID}"
 NICK_ALICE = f"IntBot_A_{_RUN_ID}"
 NICK_BOB = f"IntBot_B_{_RUN_ID}"
+NICK_ALICE_FT = f"IntBot_AF_{_RUN_ID}"
+NICK_BOB_FT = f"IntBot_BF_{_RUN_ID}"
 
 # Time budget (seconds)
 INIT_TIMEOUT = 60
@@ -469,11 +471,11 @@ async def alice_bob_with_shares():
         assert await alice.init(), "Alice (FT) failed to initialize"
         assert await bob.init(), "Bob (FT) failed to initialize"
 
-        await alice.set_setting("Nick", NICK_ALICE)
+        await alice.set_setting("Nick", NICK_ALICE_FT)
         await alice.set_setting("Description", "eiskaltdcpp-py FT test bot A")
         await alice.set_setting("DownloadDirectory", str(alice_dl) + "/")
 
-        await bob.set_setting("Nick", NICK_BOB)
+        await bob.set_setting("Nick", NICK_BOB_FT)
         await bob.set_setting("Description", "eiskaltdcpp-py FT test bot B")
         await bob.set_setting("DownloadDirectory", str(bob_dl) + "/")
 
@@ -760,12 +762,12 @@ class TestMultiClientFileTransfer:
 
         # Ensure Bob can see Alice on the hub first
         found = await bob.wait_for_nick_in_users(
-            HUB_WINTERMUTE, NICK_ALICE, timeout=USER_SYNC_TIMEOUT,
+            HUB_WINTERMUTE, NICK_ALICE_FT, timeout=USER_SYNC_TIMEOUT,
         )
-        assert found, f"Bob never saw {NICK_ALICE} in user list"
+        assert found, f"Bob never saw {NICK_ALICE_FT} in user list"
 
         result = await bob.request_and_browse_file_list(
-            HUB_WINTERMUTE, NICK_ALICE, timeout=FILE_LIST_TIMEOUT,
+            HUB_WINTERMUTE, NICK_ALICE_FT, timeout=FILE_LIST_TIMEOUT,
         )
         fl_id = result["file_list_id"]
         entries = result["entries"]
@@ -788,12 +790,12 @@ class TestMultiClientFileTransfer:
         alice, bob, hashes, alice_dl, bob_dl = alice_bob_with_shares
 
         found = await alice.wait_for_nick_in_users(
-            HUB_WINTERMUTE, NICK_BOB, timeout=USER_SYNC_TIMEOUT,
+            HUB_WINTERMUTE, NICK_BOB_FT, timeout=USER_SYNC_TIMEOUT,
         )
-        assert found, f"Alice never saw {NICK_BOB} in user list"
+        assert found, f"Alice never saw {NICK_BOB_FT} in user list"
 
         result = await alice.request_and_browse_file_list(
-            HUB_WINTERMUTE, NICK_BOB, timeout=FILE_LIST_TIMEOUT,
+            HUB_WINTERMUTE, NICK_BOB_FT, timeout=FILE_LIST_TIMEOUT,
         )
         fl_id = result["file_list_id"]
         entries = result["entries"]
@@ -814,7 +816,7 @@ class TestMultiClientFileTransfer:
         alice, bob, hashes, alice_dl, bob_dl = alice_bob_with_shares
 
         result = await bob.request_and_browse_file_list(
-            HUB_WINTERMUTE, NICK_ALICE, timeout=FILE_LIST_TIMEOUT,
+            HUB_WINTERMUTE, NICK_ALICE_FT, timeout=FILE_LIST_TIMEOUT,
         )
         fl_id = result["file_list_id"]
 
@@ -849,7 +851,7 @@ class TestMultiClientFileTransfer:
         alice, bob, hashes, alice_dl, bob_dl = alice_bob_with_shares
 
         result = await bob.request_and_browse_file_list(
-            HUB_WINTERMUTE, NICK_ALICE, timeout=FILE_LIST_TIMEOUT,
+            HUB_WINTERMUTE, NICK_ALICE_FT, timeout=FILE_LIST_TIMEOUT,
         )
         fl_id = result["file_list_id"]
 
@@ -905,7 +907,7 @@ class TestMultiClientFileTransfer:
         alice, bob, hashes, alice_dl, bob_dl = alice_bob_with_shares
 
         result = await bob.request_and_browse_file_list(
-            HUB_WINTERMUTE, NICK_ALICE, timeout=FILE_LIST_TIMEOUT,
+            HUB_WINTERMUTE, NICK_ALICE_FT, timeout=FILE_LIST_TIMEOUT,
         )
         fl_id = result["file_list_id"]
 
@@ -955,7 +957,7 @@ class TestMultiClientFileTransfer:
         alice, bob, hashes, alice_dl, bob_dl = alice_bob_with_shares
 
         result = await alice.request_and_browse_file_list(
-            HUB_WINTERMUTE, NICK_BOB, timeout=FILE_LIST_TIMEOUT,
+            HUB_WINTERMUTE, NICK_BOB_FT, timeout=FILE_LIST_TIMEOUT,
         )
         fl_id = result["file_list_id"]
 
