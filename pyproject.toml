@@ -29,6 +29,23 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
+[project.optional-dependencies]
+api = [
+    "fastapi>=0.104",
+    "uvicorn[standard]>=0.24",
+    "python-jose[cryptography]>=3.3",
+    "bcrypt>=4.0",
+    "pydantic>=2.0",
+]
+api-test = [
+    "httpx>=0.25",
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+
+[project.scripts]
+eiskaltdcpp-api = "eiskaltdcpp.api.__main__:main"
+
 [project.urls]
 Homepage = "https://github.com/transfix/eiskaltdcpp-py"
 Repository = "https://github.com/transfix/eiskaltdcpp-py"
