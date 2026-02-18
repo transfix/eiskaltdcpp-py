@@ -47,7 +47,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest pytest-asyncio click \
+          python -m pip install pytest pytest-asyncio pytest-timeout click \
             fastapi uvicorn[standard] python-jose[cryptography] bcrypt pydantic httpx
 
       - name: Configure
@@ -68,3 +68,54 @@ jobs:
         run: |
           PYTHONPATH=build/python python -m pytest tests/ -v --tb=short \
             --ignore=tests/test_integration.py
+
+  integration:
+    name: Integration tests
+    needs: build-and-test
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 15
+
+    # Network issues with live hubs should not block merging.
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake swig python3-dev \
+            libssl-dev zlib1g-dev libbz2-dev \
+            libeiskaltdcpp-dev \
+            liblua5.3-dev
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest pytest-asyncio pytest-timeout click \
+            fastapi uvicorn[standard] python-jose[cryptography] bcrypt pydantic httpx
+
+      - name: Build
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTS=ON \
+            -DPython3_EXECUTABLE=$(which python)
+          cmake --build build -j$(nproc)
+
+      - name: Run integration tests
+        env:
+          PYTHONPATH: build/python
+        run: |
+          python -m pytest tests/test_integration.py \
+            -v --tb=long --timeout=300 -x
