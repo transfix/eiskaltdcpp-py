@@ -359,7 +359,19 @@ class TestHubConnection:
         for hub_info in hubs:
             assert hub_info.connected, f"{hub_info.url} not connected"
             assert len(hub_info.name) > 0, f"{hub_info.url} has empty name"
-            assert hub_info.userCount >= 1
+            # User list may not be populated immediately after connect;
+            # poll until we see at least ourselves.
+            for _ in range(30):
+                refreshed = [
+                    h for h in client.list_hubs() if h.url == hub_info.url
+                ]
+                if refreshed and refreshed[0].userCount >= 1:
+                    break
+                await asyncio.sleep(1)
+            final = [h for h in client.list_hubs() if h.url == hub_info.url]
+            assert final and final[0].userCount >= 1, (
+                f"{hub_info.url}: userCount still 0 after 30s"
+            )
 
     @pytest.mark.asyncio(loop_scope="module")
     async def test_user_list_not_empty(self, client):
