@@ -556,6 +556,14 @@ class DCClient:
         """Set a DC client setting."""
         self._bridge.setSetting(name, value)
 
+    def start_networking(self) -> None:
+        """(Re)start the networking stack (connection listeners).
+
+        Call this after changing connection settings like InPort,
+        ExternalIp, or IncomingConnections to apply them.
+        """
+        self._bridge.startNetworking()
+
     def reload_config(self) -> None:
         """Reload configuration from disk."""
         self._bridge.reloadConfig()

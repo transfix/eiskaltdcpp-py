@@ -133,6 +133,8 @@ class DCWorker:
             return self._cmd_close_all_file_lists()
         elif cmd == "get_share_size":
             return self._cmd_get_share_size()
+        elif cmd == "start_networking":
+            return self._cmd_start_networking()
         elif cmd == "shutdown":
             return await self._cmd_shutdown()
         elif cmd == "ping":

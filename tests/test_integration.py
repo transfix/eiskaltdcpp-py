@@ -205,6 +205,9 @@ class RemoteDCClient:
     async def add_share(self, real_path: str, virtual_name: str) -> bool:
         return await self._send("add_share", {"real_path": real_path, "virtual_name": virtual_name})
 
+    async def start_networking(self) -> None:
+        await self._send("start_networking")
+
     async def refresh_share(self) -> None:
         await self._send("refresh_share")
 
@@ -478,6 +481,24 @@ async def alice_bob_with_shares():
         await bob.set_setting("Nick", NICK_BOB_FT)
         await bob.set_setting("Description", "eiskaltdcpp-py FT test bot B")
         await bob.set_setting("DownloadDirectory", str(bob_dl) + "/")
+
+        # Configure active mode with unique ports so clients can
+        # establish direct connections for file list / file transfers.
+        # Both run on the same host so they need different TCP/UDP/TLS
+        # ports and must advertise 127.0.0.1.
+        for client_obj, tcp_port in [(alice, "4200"), (bob, "4210")]:
+            await client_obj.set_setting("IncomingConnections", "0")  # Active/Direct
+            await client_obj.set_setting("InPort", tcp_port)           # TCP
+            await client_obj.set_setting("UDPPort", tcp_port)          # UDP
+            await client_obj.set_setting("TLSPort", str(int(tcp_port) + 1))  # TLS
+            await client_obj.set_setting("ExternalIp", "127.0.0.1")
+            await client_obj.set_setting("NoIpOverride", "1")
+            await client_obj.set_setting("AutoDetectIncomingConnection", "0")
+            await client_obj.set_setting("Slots", "3")
+
+        # Apply the connection settings (opens TCP/UDP listeners)
+        await alice.start_networking()
+        await bob.start_networking()
 
         # Share directories
         assert await alice.add_share(str(alice_share), "AliceFiles")
@@ -766,15 +787,9 @@ class TestMultiClientFileTransfer:
         )
         assert found, f"Bob never saw {NICK_ALICE_FT} in user list"
 
-        try:
-            result = await bob.request_and_browse_file_list(
-                HUB_WINTERMUTE, NICK_ALICE_FT, timeout=FILE_LIST_TIMEOUT,
-            )
-        except (RuntimeError, asyncio.TimeoutError) as exc:
-            pytest.skip(
-                f"File list request timed out — network may not support "
-                f"client-to-client connections: {exc}"
-            )
+        result = await bob.request_and_browse_file_list(
+            HUB_WINTERMUTE, NICK_ALICE_FT, timeout=FILE_LIST_TIMEOUT,
+        )
         fl_id = result["file_list_id"]
         entries = result["entries"]
 
@@ -800,15 +815,9 @@ class TestMultiClientFileTransfer:
         )
         assert found, f"Alice never saw {NICK_BOB_FT} in user list"
 
-        try:
-            result = await alice.request_and_browse_file_list(
-                HUB_WINTERMUTE, NICK_BOB_FT, timeout=FILE_LIST_TIMEOUT,
-            )
-        except (RuntimeError, asyncio.TimeoutError) as exc:
-            pytest.skip(
-                f"File list request timed out — network may not support "
-                f"client-to-client connections: {exc}"
-            )
+        result = await alice.request_and_browse_file_list(
+            HUB_WINTERMUTE, NICK_BOB_FT, timeout=FILE_LIST_TIMEOUT,
+        )
         fl_id = result["file_list_id"]
         entries = result["entries"]
 
@@ -827,15 +836,9 @@ class TestMultiClientFileTransfer:
         """Bob can browse Alice's shared directory and see files."""
         alice, bob, hashes, alice_dl, bob_dl = alice_bob_with_shares
 
-        try:
-            result = await bob.request_and_browse_file_list(
-                HUB_WINTERMUTE, NICK_ALICE_FT, timeout=FILE_LIST_TIMEOUT,
-            )
-        except (RuntimeError, asyncio.TimeoutError) as exc:
-            pytest.skip(
-                f"File list request timed out — network may not support "
-                f"client-to-client connections: {exc}"
-            )
+        result = await bob.request_and_browse_file_list(
+            HUB_WINTERMUTE, NICK_ALICE_FT, timeout=FILE_LIST_TIMEOUT,
+        )
         fl_id = result["file_list_id"]
 
         try:
@@ -868,15 +871,9 @@ class TestMultiClientFileTransfer:
         """Bob downloads a text file from Alice and verifies integrity."""
         alice, bob, hashes, alice_dl, bob_dl = alice_bob_with_shares
 
-        try:
-            result = await bob.request_and_browse_file_list(
-                HUB_WINTERMUTE, NICK_ALICE_FT, timeout=FILE_LIST_TIMEOUT,
-            )
-        except (RuntimeError, asyncio.TimeoutError) as exc:
-            pytest.skip(
-                f"File list request timed out — network may not support "
-                f"client-to-client connections: {exc}"
-            )
+        result = await bob.request_and_browse_file_list(
+            HUB_WINTERMUTE, NICK_ALICE_FT, timeout=FILE_LIST_TIMEOUT,
+        )
         fl_id = result["file_list_id"]
 
         try:
@@ -907,9 +904,9 @@ class TestMultiClientFileTransfer:
                 await asyncio.sleep(2)
 
             if not downloaded:
-                pytest.skip(
+                assert False, (
                     f"Download of {target_name} did not complete within "
-                    f"{DOWNLOAD_TIMEOUT}s — hub/network may not support transfers"
+                    f"{DOWNLOAD_TIMEOUT}s"
                 )
 
             # Verify integrity
@@ -930,15 +927,9 @@ class TestMultiClientFileTransfer:
         """Bob downloads a binary file from Alice and verifies integrity."""
         alice, bob, hashes, alice_dl, bob_dl = alice_bob_with_shares
 
-        try:
-            result = await bob.request_and_browse_file_list(
-                HUB_WINTERMUTE, NICK_ALICE_FT, timeout=FILE_LIST_TIMEOUT,
-            )
-        except (RuntimeError, asyncio.TimeoutError) as exc:
-            pytest.skip(
-                f"File list request timed out — network may not support "
-                f"client-to-client connections: {exc}"
-            )
+        result = await bob.request_and_browse_file_list(
+            HUB_WINTERMUTE, NICK_ALICE_FT, timeout=FILE_LIST_TIMEOUT,
+        )
         fl_id = result["file_list_id"]
 
         try:
@@ -964,9 +955,9 @@ class TestMultiClientFileTransfer:
                 await asyncio.sleep(2)
 
             if not downloaded:
-                pytest.skip(
+                assert False, (
                     "Download of test_binary.dat did not complete within "
-                    f"{DOWNLOAD_TIMEOUT}s — hub/network may not support transfers"
+                    f"{DOWNLOAD_TIMEOUT}s"
                 )
 
             sha = hashlib.sha256()
@@ -986,15 +977,9 @@ class TestMultiClientFileTransfer:
         """Alice downloads a binary file from Bob and verifies integrity."""
         alice, bob, hashes, alice_dl, bob_dl = alice_bob_with_shares
 
-        try:
-            result = await alice.request_and_browse_file_list(
-                HUB_WINTERMUTE, NICK_BOB_FT, timeout=FILE_LIST_TIMEOUT,
-            )
-        except (RuntimeError, asyncio.TimeoutError) as exc:
-            pytest.skip(
-                f"File list request timed out — network may not support "
-                f"client-to-client connections: {exc}"
-            )
+        result = await alice.request_and_browse_file_list(
+            HUB_WINTERMUTE, NICK_BOB_FT, timeout=FILE_LIST_TIMEOUT,
+        )
         fl_id = result["file_list_id"]
 
         try:
@@ -1020,9 +1005,9 @@ class TestMultiClientFileTransfer:
                 await asyncio.sleep(2)
 
             if not downloaded:
-                pytest.skip(
+                assert False, (
                     "Download of bob_payload.bin did not complete within "
-                    f"{DOWNLOAD_TIMEOUT}s — hub/network may not support transfers"
+                    f"{DOWNLOAD_TIMEOUT}s"
                 )
 
             sha = hashlib.sha256()

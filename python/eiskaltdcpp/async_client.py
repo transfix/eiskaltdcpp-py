@@ -836,6 +836,10 @@ class AsyncDCClient:
     def set_setting(self, name: str, value: str) -> None:
         self._sync_client.set_setting(name, value)
 
+    def start_networking(self) -> None:
+        """(Re)start the networking stack (connection listeners)."""
+        self._sync_client.start_networking()
+
     # ------------------------------------------------------------------
     # Transfers & Hashing
     # ------------------------------------------------------------------

@@ -220,7 +220,6 @@ Example:
 %ignore eiskaltdcpp_py::DCBridge::HubData;
 %ignore eiskaltdcpp_py::DCBridge::findHub;
 %ignore eiskaltdcpp_py::DCBridge::findClient;
-%ignore eiskaltdcpp_py::DCBridge::startNetworking;
 
 // ============================================================================
 // Include the headers to generate wrappers

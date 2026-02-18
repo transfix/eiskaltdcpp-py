@@ -283,6 +283,11 @@ public:
     /// Reload configuration from disk.
     void reloadConfig();
 
+    /// (Re)start the networking stack — opens TCP/UDP listeners based on
+    /// current connection settings.  Call after changing InPort,
+    /// ExternalIp, IncomingConnections, etc.
+    void startNetworking();
+
     // =====================================================================
     // Version info
     // =====================================================================
@@ -318,7 +323,6 @@ private:
     // Internal helpers
     HubData* findHub(const std::string& url);
     dcpp::Client* findClient(const std::string& url);
-    void startNetworking();
 
     // Maximum chat history lines per hub
     static const size_t MAX_CHAT_LINES = 100;
