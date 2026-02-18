@@ -9,6 +9,8 @@ from eiskaltdcpp.api.routes.search import router as search_router
 from eiskaltdcpp.api.routes.settings import router as settings_router
 from eiskaltdcpp.api.routes.shares import router as shares_router
 from eiskaltdcpp.api.routes.status import router as status_router
+from eiskaltdcpp.api.dashboard import router as dashboard_router
+from eiskaltdcpp.api.websocket import router as ws_router
 
 all_routers = [
     auth_router,
@@ -19,4 +21,6 @@ all_routers = [
     shares_router,
     settings_router,
     status_router,
+    ws_router,
+    dashboard_router,
 ]
