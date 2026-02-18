@@ -118,4 +118,5 @@ jobs:
           PYTHONPATH: build/python
         run: |
           python -m pytest tests/test_integration.py \
-            -v --tb=long --timeout=300 -x
+            -v --tb=long --timeout=300 -x \
+            -o "addopts="
