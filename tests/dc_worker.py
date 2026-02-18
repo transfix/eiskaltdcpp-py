@@ -109,6 +109,30 @@ class DCWorker:
             return self._cmd_add_share(args)
         elif cmd == "refresh_share":
             return self._cmd_refresh_share()
+        elif cmd == "request_file_list":
+            return self._cmd_request_file_list(args)
+        elif cmd == "request_and_browse_file_list":
+            return await self._cmd_request_and_browse_file_list(args)
+        elif cmd == "list_local_file_lists":
+            return self._cmd_list_local_file_lists()
+        elif cmd == "open_file_list":
+            return self._cmd_open_file_list(args)
+        elif cmd == "browse_file_list":
+            return self._cmd_browse_file_list(args)
+        elif cmd == "download_from_list":
+            return self._cmd_download_from_list(args)
+        elif cmd == "download_and_wait":
+            return await self._cmd_download_and_wait(args)
+        elif cmd == "list_queue":
+            return self._cmd_list_queue()
+        elif cmd == "clear_queue":
+            return self._cmd_clear_queue()
+        elif cmd == "close_file_list":
+            return self._cmd_close_file_list(args)
+        elif cmd == "close_all_file_lists":
+            return self._cmd_close_all_file_lists()
+        elif cmd == "get_share_size":
+            return self._cmd_get_share_size()
         elif cmd == "shutdown":
             return await self._cmd_shutdown()
         elif cmd == "ping":
@@ -134,6 +158,9 @@ class DCWorker:
                 "hub_connected", "hub_disconnected", "chat_message",
                 "private_message", "user_connected", "user_disconnected",
                 "search_result",
+                "download_starting", "download_complete", "download_failed",
+                "upload_starting", "upload_complete",
+                "queue_item_added", "queue_item_finished", "queue_item_removed",
             ]:
                 self.client.on(event_name, self._make_forwarder(event_name))
 
@@ -214,6 +241,100 @@ class DCWorker:
 
     def _cmd_refresh_share(self) -> None:
         self.client.refresh_share()
+
+    # -- File list commands ------------------------------------------------
+
+    def _cmd_request_file_list(self, args: dict) -> bool:
+        return self.client.request_file_list(
+            args["hub_url"], args["nick"],
+            match_queue=args.get("match_queue", False),
+        )
+
+    async def _cmd_request_and_browse_file_list(self, args: dict) -> dict:
+        timeout = args.get("timeout", 60)
+        fl_id, entries = await self.client.request_and_browse_file_list(
+            args["hub_url"], args["nick"], timeout=timeout,
+        )
+        return {
+            "file_list_id": fl_id,
+            "entries": [
+                {
+                    "name": e.name,
+                    "size": e.size,
+                    "tth": getattr(e, "tth", ""),
+                    "isDirectory": e.isDirectory,
+                }
+                for e in entries
+            ],
+        }
+
+    def _cmd_list_local_file_lists(self) -> list:
+        return self.client.list_local_file_lists()
+
+    def _cmd_open_file_list(self, args: dict) -> bool:
+        return self.client.open_file_list(args["file_list_id"])
+
+    def _cmd_browse_file_list(self, args: dict) -> list:
+        entries = self.client.browse_file_list(
+            args["file_list_id"],
+            directory=args.get("directory", "/"),
+        )
+        return [
+            {
+                "name": e.name,
+                "size": e.size,
+                "tth": getattr(e, "tth", ""),
+                "isDirectory": e.isDirectory,
+            }
+            for e in entries
+        ]
+
+    def _cmd_download_from_list(self, args: dict) -> bool:
+        return self.client.download_from_list(
+            args["file_list_id"],
+            args["file_path"],
+            download_to=args.get("download_to", ""),
+        )
+
+    async def _cmd_download_and_wait(self, args: dict) -> dict:
+        timeout = args.get("timeout", 120)
+        ok, err = await self.client.download_and_wait(
+            args["directory"], args["name"],
+            args["size"], args["tth"],
+            timeout=timeout,
+        )
+        return {"ok": ok, "error": err}
+
+    def _cmd_list_queue(self) -> list:
+        items = self.client.list_queue()
+        return [
+            {
+                "target": q.target,
+                "filename": q.filename,
+                "size": q.size,
+                "downloadedBytes": q.downloadedBytes,
+                "tth": q.tth,
+                "priority": q.priority,
+                "sources": q.sources,
+                "onlineSources": q.onlineSources,
+                "status": q.status,
+            }
+            for q in items
+        ]
+
+    def _cmd_clear_queue(self) -> None:
+        self.client.clear_queue()
+
+    def _cmd_close_file_list(self, args: dict) -> None:
+        self.client.close_file_list(args["file_list_id"])
+
+    def _cmd_close_all_file_lists(self) -> None:
+        self.client.close_all_file_lists()
+
+    def _cmd_get_share_size(self) -> int:
+        return self.client.share_size
+
+    # -- Lifecycle ---------------------------------------------------------
 
     async def _cmd_shutdown(self) -> None:
         if self.client:

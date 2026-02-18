@@ -641,18 +641,39 @@ std::vector<QueueItemInfo> DCBridge::listQueue() {
     std::vector<QueueItemInfo> result;
     if (!m_initialized.load()) return result;
 
-    // TODO: implement queue listing when QueueManager public API is confirmed.
-    // The QueueManager::lockQueue()/unlockQueue() pattern requires careful
-    // manual lock management. For now, return empty.
+    const QueueItem::StringMap& ll = QueueManager::getInstance()->lockQueue();
+    for (const auto& item : ll) {
+        QueueItem* qi = item.second;
+        QueueItemInfo info;
+        info.target = qi->getTarget();
+        info.filename = qi->getTargetFileName();
+        info.size = qi->getSize();
+        info.downloadedBytes = qi->getDownloadedBytes();
+        info.tth = qi->getTTH().toBase32();
+        info.priority = static_cast<int>(qi->getPriority());
+        info.sources = static_cast<int>(qi->getSources().size());
+        info.onlineSources = qi->countOnlineUsers();
+        info.status = qi->isFinished() ? 2 : (qi->isRunning() ? 1 : 0);
+        result.push_back(std::move(info));
+    }
+    QueueManager::getInstance()->unlockQueue();
+
     return result;
 }
 
 void DCBridge::clearQueue() {
     if (!m_initialized.load()) return;
-    // Remove all items from queue
-    // Matches daemon's queueClear()
+    // Collect all targets first, then remove outside the lock
     auto* qm = QueueManager::getInstance();
-    // TODO: implement full clear
+    std::vector<std::string> targets;
+    const QueueItem::StringMap& ll = qm->lockQueue();
+    for (const auto& item : ll) {
+        targets.push_back(*(item.first));
+    }
+    qm->unlockQueue();
+    for (const auto& t : targets) {
+        qm->remove(t);
+    }
 }
 
 void DCBridge::matchAllLists() {
@@ -789,8 +810,58 @@ bool DCBridge::downloadFileFromList(const std::string& fileListId,
     auto it = m_fileLists.find(fileListId);
     if (it == m_fileLists.end()) return false;
 
-    // TODO: navigate to file and queue download
-    return false;
+    auto* listing = it->second;
+
+    // Split filePath into directory and filename parts (uses backslash like DC++)
+    std::string directory = Util::getFilePath(filePath, '/');
+    std::string fname = Util::getFileName(filePath, '/');
+    if (fname.empty()) return false;
+
+    // Navigate to the directory containing the file
+    auto* dir = listing->getRoot();
+    if (!directory.empty() && directory != "/") {
+        // Convert forward slashes to navigate directory tree
+        StringTokenizer<std::string> st(directory, '/');
+        for (auto& tok : st.getTokens()) {
+            if (tok.empty()) continue;
+            bool found = false;
+            for (auto d : dir->directories) {
+                if (d->getName() == tok) {
+                    dir = d;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) return false;
+        }
+    }
+
+    // Find the file in the directory
+    DirectoryListing::File* filePtr = nullptr;
+    for (auto f : dir->files) {
+        if (f->getName() == fname) {
+            filePtr = f;
+            break;
+        }
+    }
+    if (!filePtr) return false;
+
+    // Build download target path
+    std::string target = downloadTo.empty()
+        ? SETTING(DOWNLOAD_DIRECTORY)
+        : downloadTo;
+    if (!target.empty() && target.back() == PATH_SEPARATOR)
+        target += fname;
+    else if (!target.empty() && target.back() != PATH_SEPARATOR
+             && target.find('.') == std::string::npos)
+        target += PATH_SEPARATOR + fname;
+
+    try {
+        listing->download(filePtr, target, false, false);
+    } catch (const Exception&) {
+        return false;
+    }
+    return true;
 }
 
 bool DCBridge::downloadDirFromList(const std::string& fileListId,
@@ -803,8 +874,39 @@ bool DCBridge::downloadDirFromList(const std::string& fileListId,
     auto it = m_fileLists.find(fileListId);
     if (it == m_fileLists.end()) return false;
 
-    // TODO: navigate to directory and queue recursive download
-    return false;
+    auto* listing = it->second;
+
+    // Navigate to the requested directory
+    DirectoryListing::Directory* dir = nullptr;
+    if (dirPath.empty() || dirPath == "/") {
+        dir = listing->getRoot();
+    } else {
+        dir = listing->getRoot();
+        StringTokenizer<std::string> st(dirPath, '/');
+        for (auto& tok : st.getTokens()) {
+            if (tok.empty()) continue;
+            bool found = false;
+            for (auto d : dir->directories) {
+                if (d->getName() == tok) {
+                    dir = d;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) return false;
+        }
+    }
+
+    std::string target = downloadTo.empty()
+        ? SETTING(DOWNLOAD_DIRECTORY)
+        : downloadTo;
+
+    try {
+        listing->download(dir, target, false);
+    } catch (const Exception&) {
+        return false;
+    }
+    return true;
 }
 
 void DCBridge::closeFileList(const std::string& fileListId) {

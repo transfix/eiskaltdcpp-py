@@ -764,6 +764,36 @@ class AsyncDCClient:
         """Browse a directory in an opened file list."""
         return self._sync_client.browse_file_list(file_list_id, directory)
 
+    def list_local_file_lists(self) -> list[str]:
+        """List locally stored file lists."""
+        return self._sync_client.list_local_file_lists()
+
+    def open_file_list(self, file_list_id: str) -> bool:
+        """Open/parse a local file list."""
+        return self._sync_client.open_file_list(file_list_id)
+
+    def download_from_list(
+        self,
+        file_list_id: str,
+        file_path: str,
+        download_to: str = "",
+    ) -> bool:
+        """Download a file from a file list."""
+        return self._sync_client.download_from_list(
+            file_list_id, file_path, download_to
+        )
+
+    def download_dir_from_list(
+        self,
+        file_list_id: str,
+        dir_path: str,
+        download_to: str = "",
+    ) -> bool:
+        """Download an entire directory from a file list."""
+        return self._sync_client.download_dir_from_list(
+            file_list_id, dir_path, download_to
+        )
+
     def close_file_list(self, file_list_id: str) -> None:
         """Close an opened file list."""
         self._sync_client.close_file_list(file_list_id)

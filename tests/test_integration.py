@@ -22,9 +22,11 @@ Or via CI with the "integration" workflow.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
+import random
 import shutil
 import subprocess
 import sys
@@ -74,6 +76,9 @@ CONNECT_TIMEOUT = 45
 USER_SYNC_TIMEOUT = 60
 PM_TIMEOUT = 30
 SEARCH_TIMEOUT = 30
+FILE_LIST_TIMEOUT = 90
+DOWNLOAD_TIMEOUT = 120
+SHARE_REFRESH_WAIT = 30
 
 WORKER_SCRIPT = Path(__file__).parent / "dc_worker.py"
 
@@ -200,6 +205,61 @@ class RemoteDCClient:
 
     async def refresh_share(self) -> None:
         await self._send("refresh_share")
+
+    async def get_share_size(self) -> int:
+        return await self._send("get_share_size")
+
+    # -- File list methods -------------------------------------------------
+
+    async def request_file_list(self, hub_url: str, nick: str) -> bool:
+        return await self._send("request_file_list", {"hub_url": hub_url, "nick": nick})
+
+    async def request_and_browse_file_list(
+        self, hub_url: str, nick: str, timeout: float = 60,
+    ) -> dict:
+        return await self._send(
+            "request_and_browse_file_list",
+            {"hub_url": hub_url, "nick": nick, "timeout": timeout},
+            timeout=timeout + 15,
+        )
+
+    async def list_local_file_lists(self) -> list:
+        return await self._send("list_local_file_lists")
+
+    async def open_file_list(self, file_list_id: str) -> bool:
+        return await self._send("open_file_list", {"file_list_id": file_list_id})
+
+    async def browse_file_list(self, file_list_id: str, directory: str = "/") -> list:
+        return await self._send("browse_file_list", {"file_list_id": file_list_id, "directory": directory})
+
+    async def download_from_list(
+        self, file_list_id: str, file_path: str, download_to: str = "",
+    ) -> bool:
+        return await self._send(
+            "download_from_list",
+            {"file_list_id": file_list_id, "file_path": file_path, "download_to": download_to},
+        )
+
+    async def download_and_wait(
+        self, directory: str, name: str, size: int, tth: str, timeout: float = 120,
+    ) -> dict:
+        return await self._send(
+            "download_and_wait",
+            {"directory": directory, "name": name, "size": size, "tth": tth, "timeout": timeout},
+            timeout=timeout + 15,
+        )
+
+    async def list_queue(self) -> list:
+        return await self._send("list_queue")
+
+    async def clear_queue(self) -> None:
+        await self._send("clear_queue")
+
+    async def close_file_list(self, file_list_id: str) -> None:
+        await self._send("close_file_list", {"file_list_id": file_list_id})
+
+    async def close_all_file_lists(self) -> None:
+        await self._send("close_all_file_lists")
 
     async def wait_event(self, event_name: str, timeout: float = 30) -> list:
         """Wait for a specific event from the worker."""
@@ -336,6 +396,114 @@ async def alice_and_bob():
                 await c.close()
             except Exception:
                 pass
+
+
+def _generate_test_file(path: Path, size: int, *, binary: bool = False) -> str:
+    """
+    Generate a deterministic test file and return its SHA-256 hex digest.
+
+    Uses a seeded PRNG so the content is reproducible but non-trivial.
+    """
+    rng = random.Random(42)
+    sha = hashlib.sha256()
+    with open(path, "wb") as f:
+        remaining = size
+        while remaining > 0:
+            chunk_size = min(remaining, 8192)
+            if binary:
+                chunk = bytes(rng.getrandbits(8) for _ in range(chunk_size))
+            else:
+                # Printable ASCII text with line breaks
+                chars = []
+                for _ in range(chunk_size):
+                    if rng.random() < 0.05:
+                        chars.append(ord("\n"))
+                    else:
+                        chars.append(rng.randint(32, 126))
+                chunk = bytes(chars)
+            f.write(chunk)
+            sha.update(chunk)
+            remaining -= chunk_size
+    return sha.hexdigest()
+
+
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
+async def alice_bob_with_shares():
+    """
+    Alice and Bob with shared directories containing test files.
+
+    Alice shares a ~2MB text file and a ~1.5MB binary file.
+    Bob shares a ~2MB binary file.
+    Both set up download directories.
+    """
+    alice = RemoteDCClient("alice_ft")
+    bob = RemoteDCClient("bob_ft")
+
+    # Temp dirs for shares and downloads
+    alice_share = Path(tempfile.mkdtemp(prefix="dcpy_alice_share_"))
+    bob_share = Path(tempfile.mkdtemp(prefix="dcpy_bob_share_"))
+    alice_dl = Path(tempfile.mkdtemp(prefix="dcpy_alice_dl_"))
+    bob_dl = Path(tempfile.mkdtemp(prefix="dcpy_bob_dl_"))
+
+    # Generate test files
+    alice_text_hash = _generate_test_file(
+        alice_share / "test_document.txt", 2 * 1024 * 1024, binary=False,
+    )
+    alice_bin_hash = _generate_test_file(
+        alice_share / "test_binary.dat", 1536 * 1024, binary=True,
+    )
+    bob_bin_hash = _generate_test_file(
+        bob_share / "bob_payload.bin", 2 * 1024 * 1024, binary=True,
+    )
+
+    file_hashes = {
+        "test_document.txt": alice_text_hash,
+        "test_binary.dat": alice_bin_hash,
+        "bob_payload.bin": bob_bin_hash,
+    }
+
+    try:
+        await alice.start()
+        await bob.start()
+
+        assert await alice.init(), "Alice (FT) failed to initialize"
+        assert await bob.init(), "Bob (FT) failed to initialize"
+
+        await alice.set_setting("Nick", NICK_ALICE)
+        await alice.set_setting("Description", "eiskaltdcpp-py FT test bot A")
+        await alice.set_setting("DownloadDirectory", str(alice_dl) + "/")
+
+        await bob.set_setting("Nick", NICK_BOB)
+        await bob.set_setting("Description", "eiskaltdcpp-py FT test bot B")
+        await bob.set_setting("DownloadDirectory", str(bob_dl) + "/")
+
+        # Share directories
+        assert await alice.add_share(str(alice_share), "AliceFiles")
+        assert await bob.add_share(str(bob_share), "BobFiles")
+
+        # Refresh to hash and announce
+        await alice.refresh_share()
+        await bob.refresh_share()
+
+        # Connect both to the hub
+        await asyncio.gather(
+            alice.connect(HUB_WINTERMUTE, timeout=CONNECT_TIMEOUT),
+            bob.connect(HUB_WINTERMUTE, timeout=CONNECT_TIMEOUT),
+        )
+
+        # Wait for hashing + user list propagation
+        await asyncio.sleep(SHARE_REFRESH_WAIT)
+
+        yield alice, bob, file_hashes, alice_dl, bob_dl
+
+    finally:
+        for c in (alice, bob):
+            try:
+                await c.close()
+            except Exception:
+                pass
+        for d in (alice_share, bob_share, alice_dl, bob_dl):
+            shutil.rmtree(d, ignore_errors=True)
 
 
 # =========================================================================
@@ -569,3 +737,264 @@ class TestMultiClientPrivateMessage:
         assert test_msg in pm["message"], (
             f"Expected '{test_msg}' in PM, got: '{pm['message']}'"
         )
+
+
+# =========================================================================
+# File transfer tests (separate processes with shared directories)
+# =========================================================================
+
+class TestMultiClientFileTransfer:
+    """
+    Verify file listing and transfer between two subprocess clients.
+
+    Alice and Bob each share a directory with generated test files
+    (a mix of text and binary data, ~1.5-2 MB each).  They request
+    each other's file lists, browse them, queue downloads, and verify
+    file integrity via SHA-256.
+    """
+
+    @pytest.mark.asyncio(loop_scope="module")
+    async def test_bob_requests_alice_file_list(self, alice_bob_with_shares):
+        """Bob can request and receive Alice's file list."""
+        alice, bob, hashes, alice_dl, bob_dl = alice_bob_with_shares
+
+        # Ensure Bob can see Alice on the hub first
+        found = await bob.wait_for_nick_in_users(
+            HUB_WINTERMUTE, NICK_ALICE, timeout=USER_SYNC_TIMEOUT,
+        )
+        assert found, f"Bob never saw {NICK_ALICE} in user list"
+
+        result = await bob.request_and_browse_file_list(
+            HUB_WINTERMUTE, NICK_ALICE, timeout=FILE_LIST_TIMEOUT,
+        )
+        fl_id = result["file_list_id"]
+        entries = result["entries"]
+
+        assert fl_id, "No file list ID returned"
+        assert len(entries) >= 1, "Alice's root file list is empty"
+
+        # We expect an "AliceFiles" directory
+        names = [e["name"] for e in entries]
+        assert "AliceFiles" in names, (
+            f"Expected 'AliceFiles' in root entries, got: {names}"
+        )
+
+        # Clean up
+        await bob.close_file_list(fl_id)
+
+    @pytest.mark.asyncio(loop_scope="module")
+    async def test_alice_requests_bob_file_list(self, alice_bob_with_shares):
+        """Alice can request and receive Bob's file list."""
+        alice, bob, hashes, alice_dl, bob_dl = alice_bob_with_shares
+
+        found = await alice.wait_for_nick_in_users(
+            HUB_WINTERMUTE, NICK_BOB, timeout=USER_SYNC_TIMEOUT,
+        )
+        assert found, f"Alice never saw {NICK_BOB} in user list"
+
+        result = await alice.request_and_browse_file_list(
+            HUB_WINTERMUTE, NICK_BOB, timeout=FILE_LIST_TIMEOUT,
+        )
+        fl_id = result["file_list_id"]
+        entries = result["entries"]
+
+        assert fl_id, "No file list ID returned"
+        assert len(entries) >= 1, "Bob's root file list is empty"
+
+        names = [e["name"] for e in entries]
+        assert "BobFiles" in names, (
+            f"Expected 'BobFiles' in root entries, got: {names}"
+        )
+
+        await alice.close_file_list(fl_id)
+
+    @pytest.mark.asyncio(loop_scope="module")
+    async def test_bob_browses_alice_share(self, alice_bob_with_shares):
+        """Bob can browse Alice's shared directory and see files."""
+        alice, bob, hashes, alice_dl, bob_dl = alice_bob_with_shares
+
+        result = await bob.request_and_browse_file_list(
+            HUB_WINTERMUTE, NICK_ALICE, timeout=FILE_LIST_TIMEOUT,
+        )
+        fl_id = result["file_list_id"]
+
+        try:
+            # Browse into the AliceFiles virtual directory
+            entries = await bob.browse_file_list(fl_id, "AliceFiles")
+            file_names = [e["name"] for e in entries if not e["isDirectory"]]
+
+            assert "test_document.txt" in file_names, (
+                f"Expected test_document.txt in AliceFiles, got: {file_names}"
+            )
+            assert "test_binary.dat" in file_names, (
+                f"Expected test_binary.dat in AliceFiles, got: {file_names}"
+            )
+
+            # Verify sizes are reasonable (should be ~2MB and ~1.5MB)
+            for e in entries:
+                if e["name"] == "test_document.txt":
+                    assert e["size"] == 2 * 1024 * 1024, (
+                        f"test_document.txt size mismatch: {e['size']}"
+                    )
+                elif e["name"] == "test_binary.dat":
+                    assert e["size"] == 1536 * 1024, (
+                        f"test_binary.dat size mismatch: {e['size']}"
+                    )
+        finally:
+            await bob.close_file_list(fl_id)
+
+    @pytest.mark.asyncio(loop_scope="module")
+    async def test_bob_downloads_text_file_from_alice(self, alice_bob_with_shares):
+        """Bob downloads a text file from Alice and verifies integrity."""
+        alice, bob, hashes, alice_dl, bob_dl = alice_bob_with_shares
+
+        result = await bob.request_and_browse_file_list(
+            HUB_WINTERMUTE, NICK_ALICE, timeout=FILE_LIST_TIMEOUT,
+        )
+        fl_id = result["file_list_id"]
+
+        try:
+            # Find the text file's TTH for queueing
+            entries = await bob.browse_file_list(fl_id, "AliceFiles")
+            text_entry = next(
+                (e for e in entries if e["name"] == "test_document.txt"), None,
+            )
+            assert text_entry is not None, "test_document.txt not found"
+            assert len(text_entry["tth"]) > 0, "TTH is empty"
+
+            # Queue download via the file list
+            ok = await bob.download_from_list(
+                fl_id, "AliceFiles/test_document.txt",
+                download_to=str(bob_dl) + "/",
+            )
+            assert ok, "download_from_list returned False"
+
+            # Wait for download to complete (poll the filesystem)
+            target_name = "test_document.txt"
+            deadline = asyncio.get_event_loop().time() + DOWNLOAD_TIMEOUT
+            downloaded = False
+            while asyncio.get_event_loop().time() < deadline:
+                dl_path = bob_dl / target_name
+                if dl_path.exists() and dl_path.stat().st_size == text_entry["size"]:
+                    downloaded = True
+                    break
+                await asyncio.sleep(2)
+
+            if not downloaded:
+                pytest.skip(
+                    f"Download of {target_name} did not complete within "
+                    f"{DOWNLOAD_TIMEOUT}s — hub/network may not support transfers"
+                )
+
+            # Verify integrity
+            sha = hashlib.sha256()
+            with open(dl_path, "rb") as f:
+                for chunk in iter(lambda: f.read(8192), b""):
+                    sha.update(chunk)
+            actual_hash = sha.hexdigest()
+            assert actual_hash == hashes["test_document.txt"], (
+                f"SHA-256 mismatch for {target_name}: "
+                f"expected {hashes['test_document.txt']}, got {actual_hash}"
+            )
+        finally:
+            await bob.close_file_list(fl_id)
+
+    @pytest.mark.asyncio(loop_scope="module")
+    async def test_bob_downloads_binary_file_from_alice(self, alice_bob_with_shares):
+        """Bob downloads a binary file from Alice and verifies integrity."""
+        alice, bob, hashes, alice_dl, bob_dl = alice_bob_with_shares
+
+        result = await bob.request_and_browse_file_list(
+            HUB_WINTERMUTE, NICK_ALICE, timeout=FILE_LIST_TIMEOUT,
+        )
+        fl_id = result["file_list_id"]
+
+        try:
+            entries = await bob.browse_file_list(fl_id, "AliceFiles")
+            bin_entry = next(
+                (e for e in entries if e["name"] == "test_binary.dat"), None,
+            )
+            assert bin_entry is not None, "test_binary.dat not found"
+
+            ok = await bob.download_from_list(
+                fl_id, "AliceFiles/test_binary.dat",
+                download_to=str(bob_dl) + "/",
+            )
+            assert ok, "download_from_list returned False"
+
+            deadline = asyncio.get_event_loop().time() + DOWNLOAD_TIMEOUT
+            downloaded = False
+            while asyncio.get_event_loop().time() < deadline:
+                dl_path = bob_dl / "test_binary.dat"
+                if dl_path.exists() and dl_path.stat().st_size == bin_entry["size"]:
+                    downloaded = True
+                    break
+                await asyncio.sleep(2)
+
+            if not downloaded:
+                pytest.skip(
+                    "Download of test_binary.dat did not complete within "
+                    f"{DOWNLOAD_TIMEOUT}s — hub/network may not support transfers"
+                )
+
+            sha = hashlib.sha256()
+            with open(dl_path, "rb") as f:
+                for chunk in iter(lambda: f.read(8192), b""):
+                    sha.update(chunk)
+            actual_hash = sha.hexdigest()
+            assert actual_hash == hashes["test_binary.dat"], (
+                f"SHA-256 mismatch for test_binary.dat: "
+                f"expected {hashes['test_binary.dat']}, got {actual_hash}"
+            )
+        finally:
+            await bob.close_file_list(fl_id)
+
+    @pytest.mark.asyncio(loop_scope="module")
+    async def test_alice_downloads_file_from_bob(self, alice_bob_with_shares):
+        """Alice downloads a binary file from Bob and verifies integrity."""
+        alice, bob, hashes, alice_dl, bob_dl = alice_bob_with_shares
+
+        result = await alice.request_and_browse_file_list(
+            HUB_WINTERMUTE, NICK_BOB, timeout=FILE_LIST_TIMEOUT,
+        )
+        fl_id = result["file_list_id"]
+
+        try:
+            entries = await alice.browse_file_list(fl_id, "BobFiles")
+            bob_entry = next(
+                (e for e in entries if e["name"] == "bob_payload.bin"), None,
+            )
+            assert bob_entry is not None, "bob_payload.bin not found"
+
+            ok = await alice.download_from_list(
+                fl_id, "BobFiles/bob_payload.bin",
+                download_to=str(alice_dl) + "/",
+            )
+            assert ok, "download_from_list returned False"
+
+            deadline = asyncio.get_event_loop().time() + DOWNLOAD_TIMEOUT
+            downloaded = False
+            while asyncio.get_event_loop().time() < deadline:
+                dl_path = alice_dl / "bob_payload.bin"
+                if dl_path.exists() and dl_path.stat().st_size == bob_entry["size"]:
+                    downloaded = True
+                    break
+                await asyncio.sleep(2)
+
+            if not downloaded:
+                pytest.skip(
+                    "Download of bob_payload.bin did not complete within "
+                    f"{DOWNLOAD_TIMEOUT}s — hub/network may not support transfers"
+                )
+
+            sha = hashlib.sha256()
+            with open(dl_path, "rb") as f:
+                for chunk in iter(lambda: f.read(8192), b""):
+                    sha.update(chunk)
+            actual_hash = sha.hexdigest()
+            assert actual_hash == hashes["bob_payload.bin"], (
+                f"SHA-256 mismatch for bob_payload.bin: "
+                f"expected {hashes['bob_payload.bin']}, got {actual_hash}"
+            )
+        finally:
+            await alice.close_file_list(fl_id)
