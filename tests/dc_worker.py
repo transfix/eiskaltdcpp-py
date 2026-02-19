@@ -135,6 +135,10 @@ class DCWorker:
             return self._cmd_get_share_size()
         elif cmd == "start_networking":
             return self._cmd_start_networking()
+        elif cmd == "resume_hashing":
+            return self._cmd_resume_hashing()
+        elif cmd == "get_hash_status":
+            return self._cmd_get_hash_status()
         elif cmd == "shutdown":
             return await self._cmd_shutdown()
         elif cmd == "ping":
@@ -338,6 +342,17 @@ class DCWorker:
 
     def _cmd_start_networking(self) -> None:
         self.client.start_networking()
+
+    def _cmd_resume_hashing(self) -> None:
+        self.client.pause_hashing(False)
+
+    def _cmd_get_hash_status(self) -> dict:
+        hs = self.client.hash_status
+        return {
+            "currentFile": hs.currentFile,
+            "bytesLeft": hs.bytesLeft,
+            "filesLeft": hs.filesLeft,
+        }
 
     # -- Lifecycle ---------------------------------------------------------
 
