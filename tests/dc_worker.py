@@ -336,6 +336,9 @@ class DCWorker:
     def _cmd_get_share_size(self) -> int:
         return self.client.share_size
 
+    def _cmd_start_networking(self) -> None:
+        self.client.start_networking()
+
     # -- Lifecycle ---------------------------------------------------------
 
     async def _cmd_shutdown(self) -> None:
