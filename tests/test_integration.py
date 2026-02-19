@@ -504,7 +504,12 @@ async def alice_bob_with_shares():
         assert await alice.add_share(str(alice_share), "AliceFiles")
         assert await bob.add_share(str(bob_share), "BobFiles")
 
-        # Refresh to hash and announce
+        # Refresh to hash and announce.
+        # NOTE: refresh() is non-blocking — it builds the directory tree but
+        # only includes files whose TTH hash is already known.  New files are
+        # queued for hashing in the background.  After hashing completes we must
+        # call refresh_share() a SECOND time so the tree includes the now-hashed
+        # files and subsequent file-list requests carry them.
         await alice.refresh_share()
         await bob.refresh_share()
 
@@ -514,8 +519,34 @@ async def alice_bob_with_shares():
             bob.connect(HUB_WINTERMUTE, timeout=CONNECT_TIMEOUT),
         )
 
-        # Wait for hashing + user list propagation
-        await asyncio.sleep(SHARE_REFRESH_WAIT)
+        # Poll until both clients report non-zero share size (hashing done)
+        expected_alice = 2 * 1024 * 1024 + 1536 * 1024   # ~3.5 MB
+        expected_bob = 2 * 1024 * 1024                     # ~2 MB
+        deadline = asyncio.get_event_loop().time() + SHARE_REFRESH_WAIT
+        while asyncio.get_event_loop().time() < deadline:
+            a_sz = await alice.get_share_size()
+            b_sz = await bob.get_share_size()
+            if a_sz >= expected_alice and b_sz >= expected_bob:
+                break
+            await asyncio.sleep(2)
+        else:
+            # Timed out — log sizes for diagnostics but continue
+            a_sz = await alice.get_share_size()
+            b_sz = await bob.get_share_size()
+            assert False, (
+                f"Share hashing did not complete in {SHARE_REFRESH_WAIT}s. "
+                f"Alice share: {a_sz}/{expected_alice}, Bob share: {b_sz}/{expected_bob}"
+            )
+
+        # Second refresh to rebuild the directory tree now that all files
+        # have been hashed — this is required because the first refresh
+        # only includes files whose TTH was already cached.
+        await alice.refresh_share()
+        await bob.refresh_share()
+
+        # Give the second refresh a moment to finish (it re-scans dirs,
+        # but all hashes are cached so it should be near-instant).
+        await asyncio.sleep(5)
 
         yield alice, bob, file_hashes, alice_dl, bob_dl
 
