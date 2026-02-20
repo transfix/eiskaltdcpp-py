@@ -935,8 +935,18 @@ void DCBridge::closeAllFileLists() {
 bool DCBridge::addShareDir(const std::string& realPath,
                            const std::string& virtualName) {
     if (!m_initialized.load()) return false;
+
+    // ShareManager::addDirectory() does not normalise the trailing
+    // separator (unlike ShareManager::load()), so paths from e.g.
+    // tempfile.mkdtemp() that lack a trailing '/' cause buildTree()
+    // to construct malformed file paths (missing separator) and
+    // silently skip every file.
+    std::string path = realPath;
+    if (!path.empty() && path.back() != PATH_SEPARATOR)
+        path += PATH_SEPARATOR;
+
     try {
-        ShareManager::getInstance()->addDirectory(realPath, virtualName);
+        ShareManager::getInstance()->addDirectory(path, virtualName);
         return true;
     } catch (const Exception&) {
         return false;

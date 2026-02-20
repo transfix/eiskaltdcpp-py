@@ -513,8 +513,8 @@ async def alice_bob_with_shares():
         await bob.start_networking()
 
         # Share directories
-        assert await alice.add_share(str(alice_share), "AliceFiles")
-        assert await bob.add_share(str(bob_share), "BobFiles")
+        assert await alice.add_share(str(alice_share) + "/", "AliceFiles")
+        assert await bob.add_share(str(bob_share) + "/", "BobFiles")
 
         # Refresh to discover files & queue them for hashing.
         # NOTE: refresh() is non-blocking — it builds the directory tree but
