@@ -47,8 +47,12 @@
 #include <filesystem>
 #include <iostream>
 
-#include <dlfcn.h>   // dlsym — for runtime Lua scripting init
+#include <dlfcn.h>   // dlsym — for runtime ScriptInstance::L resolution
 #include <unistd.h>  // getpid — for default nick generation
+
+#ifdef LUA_SCRIPT
+#include <lua.hpp>   // Direct Lua C API (lua_pcall is a macro in Lua 5.2+)
+#endif
 
 using namespace dcpp;
 
@@ -69,37 +73,33 @@ namespace eiskaltdcpp_py {
 // dlsym using the Itanium ABI mangled names (stable on Linux/GCC/Clang).
 // =========================================================================
 
+// Resolve the protected static dcpp::ScriptInstance::L pointer via dlsym.
+// We can't #include ScriptManager.h and access it directly because L is
+// protected.  The mangled name is stable across GCC/Clang (Itanium ABI).
+#ifdef LUA_SCRIPT
+static lua_State** resolveLuaStatePtr() {
+    void* sym = dlsym(RTLD_DEFAULT, "_ZN4dcpp14ScriptInstance1LE");
+    return reinterpret_cast<lua_State**>(sym);
+}
+#endif
+
 static void initLuaScriptingIfPresent() {
-    // dcpp::ScriptInstance::L  (static protected member — lua_State* pointer)
-    // Mangled: _ZN4dcpp14ScriptInstance1LE
-    void** lua_state_ptr = reinterpret_cast<void**>(
-        dlsym(RTLD_DEFAULT,
-              "_ZN4dcpp14ScriptInstance1LE"));
+#ifdef LUA_SCRIPT
+    lua_State** lua_state_ptr = resolveLuaStatePtr();
     if (!lua_state_ptr)
         return;   // Not compiled with Lua — nothing to do
 
     if (*lua_state_ptr)
         return;   // Already initialized
 
-    // Resolve luaL_newstate and luaL_openlibs from the loaded Lua library
-    using NewStateFn = void* (*)();
-    using OpenLibsFn = void (*)(void*);
-
-    NewStateFn new_state = reinterpret_cast<NewStateFn>(
-        dlsym(RTLD_DEFAULT, "luaL_newstate"));
-    OpenLibsFn open_libs = reinterpret_cast<OpenLibsFn>(
-        dlsym(RTLD_DEFAULT, "luaL_openlibs"));
-
-    if (!new_state || !open_libs)
-        return;
-
     // Initialize a minimal Lua state so that onClientMessage() doesn't crash
     // when it calls lua_pushlightuserdata(L, ...) with L == null.
-    void* L = new_state();
+    lua_State* L = luaL_newstate();
     if (!L) return;
-    open_libs(L);
+    luaL_openlibs(L);
 
     *lua_state_ptr = L;
+#endif
 }
 
 // =========================================================================
@@ -259,6 +259,18 @@ void DCBridge::shutdown() {
         client->disconnect(true);
         ClientManager::getInstance()->putClient(client);
     }
+
+    // Close the Lua state we created in initLuaScriptingIfPresent() BEFORE
+    // dcpp::shutdown() destroys managers that may still reference it.
+#ifdef LUA_SCRIPT
+    {
+        lua_State** lua_state_ptr = resolveLuaStatePtr();
+        if (lua_state_ptr && *lua_state_ptr) {
+            lua_close(*lua_state_ptr);
+            *lua_state_ptr = nullptr;
+        }
+    }
+#endif
 
     // Shut down core library
     dcpp::shutdown();
@@ -1170,111 +1182,76 @@ void DCBridge::reloadConfig() {
 // =========================================================================
 
 bool DCBridge::luaIsAvailable() const {
-    // Check if the Lua state pointer symbol exists in the running process
-    void** lua_state_ptr = reinterpret_cast<void**>(
-        dlsym(RTLD_DEFAULT, "_ZN4dcpp14ScriptInstance1LE"));
+#ifdef LUA_SCRIPT
+    lua_State** lua_state_ptr = resolveLuaStatePtr();
     return (lua_state_ptr != nullptr && *lua_state_ptr != nullptr);
+#else
+    return false;
+#endif
 }
 
 void DCBridge::luaEval(const std::string& code) {
     if (!m_initialized.load()) throw LuaError("bridge not initialized");
 
-    void** lua_state_ptr = reinterpret_cast<void**>(
-        dlsym(RTLD_DEFAULT, "_ZN4dcpp14ScriptInstance1LE"));
+#ifdef LUA_SCRIPT
+    lua_State** lua_state_ptr = resolveLuaStatePtr();
     if (!lua_state_ptr || !*lua_state_ptr)
         throw LuaNotAvailableError();
 
-    lua_State* L = static_cast<lua_State*>(*lua_state_ptr);
-
-    // Resolve luaL_dostring (actually a macro; resolve luaL_loadstring + lua_pcall)
-    using LoadStringFn = int (*)(lua_State*, const char*);
-    using PCallFn = int (*)(lua_State*, int, int, int);
-    using ToStringFn = const char* (*)(lua_State*, int, void*);
-    using SetTopFn = void (*)(lua_State*, int);
-
-    auto luaL_loadstring = reinterpret_cast<LoadStringFn>(
-        dlsym(RTLD_DEFAULT, "luaL_loadstring"));
-    auto lua_pcall = reinterpret_cast<PCallFn>(
-        dlsym(RTLD_DEFAULT, "lua_pcall"));
-    auto lua_tolstring = reinterpret_cast<ToStringFn>(
-        dlsym(RTLD_DEFAULT, "lua_tolstring"));
-    auto lua_settop = reinterpret_cast<SetTopFn>(
-        dlsym(RTLD_DEFAULT, "lua_settop"));
-
-    if (!luaL_loadstring || !lua_pcall)
-        throw LuaSymbolError();
+    lua_State* L = *lua_state_ptr;
 
     int err = luaL_loadstring(L, code.c_str());
     if (err != 0) {
         std::string msg = "load error";
-        if (lua_tolstring) {
-            const char* s = lua_tolstring(L, -1, nullptr);
-            if (s) msg = s;
-        }
-        if (lua_settop) lua_settop(L, 0);
+        const char* s = lua_tolstring(L, -1, nullptr);
+        if (s) msg = s;
+        lua_settop(L, 0);
         throw LuaLoadError(msg);
     }
 
     err = lua_pcall(L, 0, 0, 0);
     if (err != 0) {
         std::string msg = "runtime error";
-        if (lua_tolstring) {
-            const char* s = lua_tolstring(L, -1, nullptr);
-            if (s) msg = s;
-        }
-        if (lua_settop) lua_settop(L, 0);
+        const char* s = lua_tolstring(L, -1, nullptr);
+        if (s) msg = s;
+        lua_settop(L, 0);
         throw LuaRuntimeError(msg);
     }
+#else
+    throw LuaNotAvailableError();
+#endif
 }
 
 void DCBridge::luaEvalFile(const std::string& path) {
     if (!m_initialized.load()) throw LuaError("bridge not initialized");
 
-    void** lua_state_ptr = reinterpret_cast<void**>(
-        dlsym(RTLD_DEFAULT, "_ZN4dcpp14ScriptInstance1LE"));
+#ifdef LUA_SCRIPT
+    lua_State** lua_state_ptr = resolveLuaStatePtr();
     if (!lua_state_ptr || !*lua_state_ptr)
         throw LuaNotAvailableError();
 
-    lua_State* L = static_cast<lua_State*>(*lua_state_ptr);
-
-    using LoadFileFn = int (*)(lua_State*, const char*);
-    using PCallFn = int (*)(lua_State*, int, int, int);
-    using ToStringFn = const char* (*)(lua_State*, int, void*);
-    using SetTopFn = void (*)(lua_State*, int);
-
-    auto luaL_loadfile = reinterpret_cast<LoadFileFn>(
-        dlsym(RTLD_DEFAULT, "luaL_loadfile"));
-    auto lua_pcall = reinterpret_cast<PCallFn>(
-        dlsym(RTLD_DEFAULT, "lua_pcall"));
-    auto lua_tolstring = reinterpret_cast<ToStringFn>(
-        dlsym(RTLD_DEFAULT, "lua_tolstring"));
-    auto lua_settop = reinterpret_cast<SetTopFn>(
-        dlsym(RTLD_DEFAULT, "lua_settop"));
-
-    if (!luaL_loadfile || !lua_pcall)
-        throw LuaSymbolError();
+    lua_State* L = *lua_state_ptr;
 
     int err = luaL_loadfile(L, path.c_str());
     if (err != 0) {
         std::string msg = "load error";
-        if (lua_tolstring) {
-            const char* s = lua_tolstring(L, -1, nullptr);
-            if (s) msg = s;
-        }
-        if (lua_settop) lua_settop(L, 0);
+        const char* s = lua_tolstring(L, -1, nullptr);
+        if (s) msg = s;
+        lua_settop(L, 0);
         throw LuaLoadError(msg);
     }
 
     err = lua_pcall(L, 0, 0, 0);
     if (err != 0) {
         std::string msg = "runtime error";
-        if (lua_tolstring) {
-            const char* s = lua_tolstring(L, -1, nullptr);
-            if (s) msg = s;
-        }
-        if (lua_settop) lua_settop(L, 0);
+        const char* s = lua_tolstring(L, -1, nullptr);
+        if (s) msg = s;
+        lua_settop(L, 0);
         throw LuaRuntimeError(msg);
     }
+#else
+    throw LuaNotAvailableError();
+#endif
 }
 
 std::string DCBridge::luaGetScriptsPath() const {

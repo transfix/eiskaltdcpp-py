@@ -61,8 +61,14 @@ target_link_libraries(eiskaltdcpp_py_bridge
 # with the same define to match the ABI.
 if(EISKALTDCPP_HAS_LUA)
     target_compile_definitions(eiskaltdcpp_py_bridge PRIVATE LUA_SCRIPT)
-    # Lua headers needed by dcpp/ScriptManager.h
+    # Lua headers needed by dcpp/ScriptManager.h and for direct Lua API calls
     target_include_directories(eiskaltdcpp_py_bridge PRIVATE ${LUA_INCLUDE_DIR})
+    # Link Lua directly so we can call the Lua C API without dlsym.
+    # In Lua 5.2+ several "functions" (lua_pcall, luaL_loadfile) are actually
+    # preprocessor macros that expand to lua_pcallk / luaL_loadfilex — these
+    # cannot be resolved at runtime via dlsym by name.  Direct linking lets
+    # the compiler expand the macros and link to the real symbols.
+    target_link_libraries(eiskaltdcpp_py_bridge PRIVATE ${LUA_LIBRARIES})
     # Our src/extra/lunar.h stub (ScriptManager.h includes "extra/lunar.h"
     # which is not installed by libeiskaltdcpp-dev)
     target_include_directories(eiskaltdcpp_py_bridge PRIVATE
