@@ -1181,13 +1181,13 @@ std::string DCBridge::luaEval(const std::string& code) {
     if (!lua_state_ptr || !*lua_state_ptr)
         return "Lua not available (library not compiled with LUA_SCRIPT)";
 
-    void* L = *lua_state_ptr;
+    lua_State* L = static_cast<lua_State*>(*lua_state_ptr);
 
     // Resolve luaL_dostring (actually a macro; resolve luaL_loadstring + lua_pcall)
-    using LoadStringFn = int (*)(void*, const char*);
-    using PCallFn = int (*)(void*, int, int, int);
-    using ToStringFn = const char* (*)(void*, int, void*);
-    using SetTopFn = void (*)(void*, int);
+    using LoadStringFn = int (*)(lua_State*, const char*);
+    using PCallFn = int (*)(lua_State*, int, int, int);
+    using ToStringFn = const char* (*)(lua_State*, int, void*);
+    using SetTopFn = void (*)(lua_State*, int);
 
     auto luaL_loadstring = reinterpret_cast<LoadStringFn>(
         dlsym(RTLD_DEFAULT, "luaL_loadstring"));
@@ -1234,12 +1234,12 @@ std::string DCBridge::luaEvalFile(const std::string& path) {
     if (!lua_state_ptr || !*lua_state_ptr)
         return "Lua not available (library not compiled with LUA_SCRIPT)";
 
-    void* L = *lua_state_ptr;
+    lua_State* L = static_cast<lua_State*>(*lua_state_ptr);
 
-    using LoadFileFn = int (*)(void*, const char*);
-    using PCallFn = int (*)(void*, int, int, int);
-    using ToStringFn = const char* (*)(void*, int, void*);
-    using SetTopFn = void (*)(void*, int);
+    using LoadFileFn = int (*)(lua_State*, const char*);
+    using PCallFn = int (*)(lua_State*, int, int, int);
+    using ToStringFn = const char* (*)(lua_State*, int, void*);
+    using SetTopFn = void (*)(lua_State*, int);
 
     auto luaL_loadfile = reinterpret_cast<LoadFileFn>(
         dlsym(RTLD_DEFAULT, "luaL_loadfile"));
