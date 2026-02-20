@@ -58,6 +58,8 @@ from typing import Optional
 
 import click
 
+from eiskaltdcpp.exceptions import LuaError
+
 logger = logging.getLogger("eiskaltdcpp.cli")
 
 # Default paths / URLs
@@ -805,10 +807,10 @@ class _LocalClientAdapter:
         return self._client.lua_is_available()
 
     async def lua_eval_async(self, code):
-        return self._client.lua_eval(code)
+        self._client.lua_eval(code)
 
     async def lua_eval_file_async(self, path):
-        return self._client.lua_eval_file(path)
+        self._client.lua_eval_file(path)
 
     async def lua_get_scripts_path_async(self):
         return self._client.lua_get_scripts_path()
@@ -1729,12 +1731,12 @@ def lua_eval(ctx, code):
     """
     async def _do():
         async with _get_client(ctx) as client:
-            error = await client.lua_eval_async(code)
-            if error:
-                click.echo(f"Lua error: {error}", err=True)
-                raise SystemExit(1)
-            else:
+            try:
+                await client.lua_eval_async(code)
                 click.echo("OK")
+            except LuaError as exc:
+                click.echo(f"Lua error ({type(exc).__name__}): {exc}", err=True)
+                raise SystemExit(1)
     _run(_do())
 
 
@@ -1751,12 +1753,12 @@ def lua_eval_file(ctx, path):
     """
     async def _do():
         async with _get_client(ctx) as client:
-            error = await client.lua_eval_file_async(path)
-            if error:
-                click.echo(f"Lua error: {error}", err=True)
-                raise SystemExit(1)
-            else:
+            try:
+                await client.lua_eval_file_async(path)
                 click.echo(f"OK — executed {path}")
+            except LuaError as exc:
+                click.echo(f"Lua error ({type(exc).__name__}): {exc}", err=True)
+                raise SystemExit(1)
     _run(_do())
 
 

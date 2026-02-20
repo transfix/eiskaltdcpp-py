@@ -12,7 +12,7 @@ This project wraps the eiskaltdcpp core C++ library via SWIG, providing:
 
 ### Features
 
-- Connect to NMDC and ADC hubs
+- Connect to NMDC and ADC hubs (with TLS encryption support)
 - Public and private chat
 - File search across connected hubs
 - Download queue management (including magnet links)
@@ -20,6 +20,7 @@ This project wraps the eiskaltdcpp core C++ library via SWIG, providing:
 - Share directory management
 - Transfer monitoring
 - File hashing control
+- Embedded Lua scripting with typed exception handling
 - Event-driven callback system (hub events, chat, users, transfers, etc.)
 
 ## Installation
@@ -863,11 +864,19 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 Via Python:
 
 ```python
-error = client.lua_eval('print("hello from lua")')
-if error:
-    print(f"Lua error: {error}")
+from eiskaltdcpp.exceptions import LuaError, LuaRuntimeError, LuaLoadError
 
-error = client.lua_eval_file("/path/to/script.lua")
+try:
+    client.lua_eval('print("hello from lua")')
+except LuaRuntimeError as exc:
+    print(f"Runtime error: {exc}")
+except LuaLoadError as exc:
+    print(f"Load error: {exc}")
+
+try:
+    client.lua_eval_file("/path/to/script.lua")
+except LuaError as exc:
+    print(f"Lua error ({type(exc).__name__}): {exc}")
 ```
 
 ### Scripts directory
@@ -919,6 +928,63 @@ the `DC` table with these functions:
 | `DC:GetAppPath()` | Application install path |
 | `DC:GetConfigPath()` | Config directory path |
 | `DC:GetScriptsPath()` | Scripts directory path |
+
+## Error handling
+
+Lua operations raise typed exceptions instead of returning error strings.
+All exception classes live in `eiskaltdcpp.exceptions` and inherit from
+`LuaError` (which extends Python's `RuntimeError`):
+
+| Exception | When raised |
+|-----------|-------------|
+| `LuaError` | Base class for all Lua errors |
+| `LuaNotAvailableError` | Lua scripting not compiled in (`LUA_SCRIPT=OFF`) |
+| `LuaSymbolError` | Lua C API symbols cannot be resolved at runtime |
+| `LuaLoadError` | Lua code failed to parse / compile |
+| `LuaRuntimeError` | Lua code compiled but raised an error during execution |
+
+Catch the base class to handle any Lua failure, or catch specific
+subclasses for fine-grained control:
+
+```python
+from eiskaltdcpp.exceptions import (
+    LuaError, LuaNotAvailableError, LuaLoadError, LuaRuntimeError,
+)
+
+try:
+    client.lua_eval('bad syntax (((')
+except LuaLoadError:
+    print("Code failed to compile")
+except LuaRuntimeError:
+    print("Runtime error in Lua")
+except LuaNotAvailableError:
+    print("Lua not available — recompile with LUA_SCRIPT=ON")
+except LuaError as exc:
+    print(f"Other Lua error: {exc}")
+```
+
+The REST API (`/api/lua/eval`, `/api/lua/eval-file`) returns the exception
+type in the `error_type` field of the response body when `ok` is `false`.
+
+## TLS encryption
+
+The DC client supports TLS-encrypted connections to hubs and peers.
+When listing connected hubs, each `HubInfo` object exposes TLS status:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `is_secure` | `bool` | `True` if the connection uses TLS |
+| `is_trusted` | `bool` | `True` if the server certificate is trusted |
+| `cipher_name` | `str` | TLS cipher suite name (e.g. `"TLS_AES_256_GCM_SHA384"`) |
+
+```python
+for hub in client.list_hubs():
+    tls = "TLS" if hub.is_secure else "plain"
+    print(f"{hub.hub_name}: {tls} ({hub.cipher_name or 'n/a'})")
+```
+
+Connect to TLS-enabled hubs using the `adcs://` (ADC+TLS) or `nmdcs://`
+(NMDC+TLS) URL schemes.
 
 ## Hashing and timing notes
 
@@ -1048,6 +1114,7 @@ eiskaltdcpp-py/
 ├── python/
 │   └── eiskaltdcpp/
 │       ├── __init__.py         # Package init
+│       ├── exceptions.py       # Typed Lua exception hierarchy
 │       ├── dc_client.py        # High-level Python wrapper
 │       ├── async_client.py     # Async wrapper
 │       ├── cli.py              # Unified Click CLI (daemon/api/up/stop/status)
@@ -1079,6 +1146,8 @@ eiskaltdcpp-py/
     ├── test_client.py          # RemoteDCClient unit tests
     ├── test_websocket.py       # WebSocket tests
     ├── test_dashboard.py       # Dashboard tests
+    ├── test_cli_remote.py      # CLI remote + local mode tests
+    ├── test_lua_integration.py # Lua scripting integration tests
     ├── test_integration.py     # Live network integration tests
     └── test_remote_client_integration.py  # RemoteDCClient integration
 ```

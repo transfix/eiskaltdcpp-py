@@ -368,6 +368,9 @@ std::vector<HubInfo> DCBridge::listHubs() {
             info.sharedBytes = client->getAvailable();
             info.connected = client->isConnected();
             info.isOp = client->isOp();
+            info.isSecure = client->isSecure();
+            info.isTrusted = client->isTrusted();
+            info.cipherName = client->getCipherName();
         }
         result.push_back(std::move(info));
     }
@@ -1173,13 +1176,13 @@ bool DCBridge::luaIsAvailable() const {
     return (lua_state_ptr != nullptr && *lua_state_ptr != nullptr);
 }
 
-std::string DCBridge::luaEval(const std::string& code) {
-    if (!m_initialized.load()) return "bridge not initialized";
+void DCBridge::luaEval(const std::string& code) {
+    if (!m_initialized.load()) throw LuaError("bridge not initialized");
 
     void** lua_state_ptr = reinterpret_cast<void**>(
         dlsym(RTLD_DEFAULT, "_ZN4dcpp14ScriptInstance1LE"));
     if (!lua_state_ptr || !*lua_state_ptr)
-        return "Lua not available (library not compiled with LUA_SCRIPT)";
+        throw LuaNotAvailableError();
 
     lua_State* L = static_cast<lua_State*>(*lua_state_ptr);
 
@@ -1199,7 +1202,7 @@ std::string DCBridge::luaEval(const std::string& code) {
         dlsym(RTLD_DEFAULT, "lua_settop"));
 
     if (!luaL_loadstring || !lua_pcall)
-        return "cannot resolve Lua C API symbols";
+        throw LuaSymbolError();
 
     int err = luaL_loadstring(L, code.c_str());
     if (err != 0) {
@@ -1209,7 +1212,7 @@ std::string DCBridge::luaEval(const std::string& code) {
             if (s) msg = s;
         }
         if (lua_settop) lua_settop(L, 0);
-        return msg;
+        throw LuaLoadError(msg);
     }
 
     err = lua_pcall(L, 0, 0, 0);
@@ -1220,19 +1223,17 @@ std::string DCBridge::luaEval(const std::string& code) {
             if (s) msg = s;
         }
         if (lua_settop) lua_settop(L, 0);
-        return msg;
+        throw LuaRuntimeError(msg);
     }
-
-    return "";  // success
 }
 
-std::string DCBridge::luaEvalFile(const std::string& path) {
-    if (!m_initialized.load()) return "bridge not initialized";
+void DCBridge::luaEvalFile(const std::string& path) {
+    if (!m_initialized.load()) throw LuaError("bridge not initialized");
 
     void** lua_state_ptr = reinterpret_cast<void**>(
         dlsym(RTLD_DEFAULT, "_ZN4dcpp14ScriptInstance1LE"));
     if (!lua_state_ptr || !*lua_state_ptr)
-        return "Lua not available (library not compiled with LUA_SCRIPT)";
+        throw LuaNotAvailableError();
 
     lua_State* L = static_cast<lua_State*>(*lua_state_ptr);
 
@@ -1251,7 +1252,7 @@ std::string DCBridge::luaEvalFile(const std::string& path) {
         dlsym(RTLD_DEFAULT, "lua_settop"));
 
     if (!luaL_loadfile || !lua_pcall)
-        return "cannot resolve Lua C API symbols";
+        throw LuaSymbolError();
 
     int err = luaL_loadfile(L, path.c_str());
     if (err != 0) {
@@ -1261,7 +1262,7 @@ std::string DCBridge::luaEvalFile(const std::string& path) {
             if (s) msg = s;
         }
         if (lua_settop) lua_settop(L, 0);
-        return msg;
+        throw LuaLoadError(msg);
     }
 
     err = lua_pcall(L, 0, 0, 0);
@@ -1272,10 +1273,8 @@ std::string DCBridge::luaEvalFile(const std::string& path) {
             if (s) msg = s;
         }
         if (lua_settop) lua_settop(L, 0);
-        return msg;
+        throw LuaRuntimeError(msg);
     }
-
-    return "";  // success
 }
 
 std::string DCBridge::luaGetScriptsPath() const {

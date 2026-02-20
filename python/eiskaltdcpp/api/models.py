@@ -326,6 +326,7 @@ class LuaEvalResponse(BaseModel):
     """Result of a Lua evaluation."""
     ok: bool
     error: str = ""
+    error_type: str = ""
 
 
 class LuaStatusResponse(BaseModel):

@@ -19,6 +19,7 @@ from eiskaltdcpp.api.models import (
     LuaScriptsResponse,
     LuaStatusResponse,
 )
+from eiskaltdcpp.exceptions import LuaError
 
 router = APIRouter(prefix="/api/lua", tags=["lua"])
 
@@ -82,8 +83,15 @@ async def lua_eval(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Lua scripting not available (library not compiled with LUA_SCRIPT)",
         )
-    error = client.lua_eval(body.code)
-    return LuaEvalResponse(ok=(error == ""), error=error)
+    try:
+        client.lua_eval(body.code)
+        return LuaEvalResponse(ok=True, error="")
+    except LuaError as exc:
+        return LuaEvalResponse(
+            ok=False,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
 
 
 @router.post(
@@ -103,5 +111,12 @@ async def lua_eval_file(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Lua scripting not available (library not compiled with LUA_SCRIPT)",
         )
-    error = client.lua_eval_file(body.path)
-    return LuaEvalResponse(ok=(error == ""), error=error)
+    try:
+        client.lua_eval_file(body.path)
+        return LuaEvalResponse(ok=True, error="")
+    except LuaError as exc:
+        return LuaEvalResponse(
+            ok=False,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )

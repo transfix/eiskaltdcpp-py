@@ -23,6 +23,7 @@ import click
 from click.testing import CliRunner
 
 from eiskaltdcpp.cli import cli
+from eiskaltdcpp.exceptions import LuaError, LuaLoadError, LuaRuntimeError
 
 
 # ============================================================================
@@ -1001,7 +1002,7 @@ class TestLuaCLI:
         assert "No scripts" in result.output
 
     def test_lua_eval_success(self, runner):
-        with _patch_client(lua_eval_async=""):
+        with _patch_client(lua_eval_async=None):
             result = runner.invoke(
                 cli, _base_args() + ["lua", "eval", 'print("hello")']
             )
@@ -1009,7 +1010,10 @@ class TestLuaCLI:
         assert "OK" in result.output
 
     def test_lua_eval_error(self, runner):
-        with _patch_client(lua_eval_async="[string]:1: syntax error"):
+        async def _raise(*a, **kw):
+            raise LuaLoadError("[string]:1: syntax error")
+
+        with _patch_client(lua_eval_async=_raise):
             result = runner.invoke(
                 cli, _base_args() + ["lua", "eval", "bad code"]
             )
@@ -1017,7 +1021,7 @@ class TestLuaCLI:
         assert "Lua error" in result.output
 
     def test_lua_eval_file_success(self, runner):
-        with _patch_client(lua_eval_file_async=""):
+        with _patch_client(lua_eval_file_async=None):
             result = runner.invoke(
                 cli, _base_args() + ["lua", "eval-file", "/tmp/test.lua"]
             )
@@ -1025,9 +1029,10 @@ class TestLuaCLI:
         assert "OK" in result.output
 
     def test_lua_eval_file_error(self, runner):
-        with _patch_client(
-            lua_eval_file_async="cannot open /tmp/test.lua: No such file",
-        ):
+        async def _raise(*a, **kw):
+            raise LuaRuntimeError("cannot open /tmp/test.lua: No such file")
+
+        with _patch_client(lua_eval_file_async=_raise):
             result = runner.invoke(
                 cli, _base_args() + ["lua", "eval-file", "/tmp/test.lua"]
             )
@@ -1169,7 +1174,7 @@ class TestLocalMode:
 
     def test_local_lua_eval_with_mock(self, runner):
         """Test local-mode lua eval."""
-        fake = FakeRemoteClient(lua_eval_async="")
+        fake = FakeRemoteClient(lua_eval_async=None)
         with patch("eiskaltdcpp.cli._get_client", return_value=fake):
             result = runner.invoke(
                 cli, ["--local", "lua", "eval", "print('hi')"]
@@ -1192,8 +1197,8 @@ class TestLuaAPIRoutes:
         client.lua_is_available.return_value = True
         client.lua_get_scripts_path.return_value = "/home/test/.eiskaltdcpp-py/scripts/"
         client.lua_list_scripts.return_value = ["test.lua", "chat.lua"]
-        client.lua_eval.return_value = ""
-        client.lua_eval_file.return_value = ""
+        client.lua_eval.return_value = None
+        client.lua_eval_file.return_value = None
         return client
 
     @pytest.fixture
@@ -1254,7 +1259,7 @@ class TestLuaAPIRoutes:
         assert data["error"] == ""
 
     def test_lua_eval_error(self, app_with_lua, mock_client):
-        mock_client.lua_eval.return_value = "syntax error near 'bad'"
+        mock_client.lua_eval.side_effect = LuaLoadError("syntax error near 'bad'")
         token = self._get_token(app_with_lua)
         resp = app_with_lua.post(
             "/api/lua/eval",

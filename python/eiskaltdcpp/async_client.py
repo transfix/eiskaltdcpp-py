@@ -884,13 +884,19 @@ class AsyncDCClient:
         """Check if Lua scripting support is available."""
         return self._sync_client.lua_is_available()
 
-    def lua_eval(self, code: str) -> str:
-        """Evaluate a Lua code chunk. Returns '' on success, error on failure."""
-        return self._sync_client.lua_eval(code)
+    def lua_eval(self, code: str) -> None:
+        """Evaluate a Lua code chunk.
 
-    def lua_eval_file(self, path: str) -> str:
-        """Evaluate a Lua script file. Returns '' on success, error on failure."""
-        return self._sync_client.lua_eval_file(path)
+        Raises LuaError subclasses on failure.
+        """
+        self._sync_client.lua_eval(code)
+
+    def lua_eval_file(self, path: str) -> None:
+        """Evaluate a Lua script file.
+
+        Raises LuaError subclasses on failure.
+        """
+        self._sync_client.lua_eval_file(path)
 
     def lua_get_scripts_path(self) -> str:
         """Get the Lua scripts directory path."""
