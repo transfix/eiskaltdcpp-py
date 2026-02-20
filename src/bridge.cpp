@@ -260,6 +260,13 @@ void DCBridge::shutdown() {
     // Shut down core library
     dcpp::shutdown();
 
+    // Allow re-initialization — dcpp singletons have been destroyed so a
+    // fresh dcpp::startup() is safe.
+    {
+        std::lock_guard<std::mutex> glock(g_dcppStartupMutex);
+        g_dcppStarted.store(false);
+    }
+
     m_initialized.store(false);
 }
 
