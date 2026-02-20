@@ -17,6 +17,7 @@
 
 #include <dcpp/DCPlusPlus.h>
 #include <dcpp/Util.h>
+#include <dcpp/BufferedSocket.h>
 #include <dcpp/Client.h>
 #include <dcpp/ClientManager.h>
 #include <dcpp/ConnectionManager.h>
@@ -260,8 +261,20 @@ void DCBridge::shutdown() {
         ClientManager::getInstance()->putClient(client);
     }
 
-    // Close the Lua state we created in initLuaScriptingIfPresent() BEFORE
-    // dcpp::shutdown() destroys managers that may still reference it.
+    // Drain all background I/O threads BEFORE touching any managers or
+    // the Lua state.  dcpp::shutdown() destroys ScriptManager (which
+    // accesses Lua) and TimerManager BEFORE it calls
+    // ConnectionManager::shutdown() / BufferedSocket::waitShutdown().
+    // If hub sockets are still running at that point, their threads
+    // crash dereferencing destroyed singletons.  Pre-draining here
+    // ensures every socket thread has exited first.
+    ConnectionManager::getInstance()->shutdown();
+    BufferedSocket::waitShutdown();
+
+    // Close the Lua state we created in initLuaScriptingIfPresent().
+    // All socket threads are stopped, so no concurrent access is
+    // possible.  ScriptManager::~ScriptManager() checks for null and
+    // will skip its own lua_close().
 #ifdef LUA_SCRIPT
     {
         lua_State** lua_state_ptr = resolveLuaStatePtr();
@@ -272,7 +285,9 @@ void DCBridge::shutdown() {
     }
 #endif
 
-    // Shut down core library
+    // Shut down core library — the redundant ConnectionManager::shutdown()
+    // and BufferedSocket::waitShutdown() calls inside are harmless
+    // (idempotent / already drained).
     dcpp::shutdown();
 
     // Allow re-initialization — dcpp singletons have been destroyed so a

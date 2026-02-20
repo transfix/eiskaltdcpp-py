@@ -84,10 +84,7 @@ def dc_client(config_dir):
     client = DCClient(config_dir)
     client.initialize()
     yield client
-    try:
-        client.shutdown()
-    except Exception:
-        pass  # shutdown may segfault in test env; ignore
+    client.shutdown()
 
 
 @pytest.fixture(scope="module")
@@ -99,12 +96,21 @@ def event_loop():
 
 
 @pytest_asyncio.fixture(scope="module")
-async def async_client(config_dir):
-    """Module-scoped AsyncDCClient."""
-    client = AsyncDCClient(config_dir)
-    await client.initialize()
+async def async_client(dc_client):
+    """Module-scoped AsyncDCClient wrapping the already-initialised dc_client.
+
+    dcpp is a per-process singleton — a second initialize() would be rejected.
+    Instead, we build an AsyncDCClient whose internal _sync_client points at
+    the existing, already-running DCClient instance.
+    """
+    # Create AsyncDCClient without a config_dir (we won't call initialize)
+    client = AsyncDCClient()
+    # Replace the internal (uninitialised) DCClient with the live one
+    client._sync_client = dc_client
+    # Wire callbacks so wait_connected / events work
+    client._wire_callbacks()
     yield client
-    await client.shutdown()
+    # Do NOT call shutdown — dc_client fixture owns the lifecycle
 
 
 # ============================================================================
@@ -383,26 +389,30 @@ HUB_URL = os.environ.get(
 )
 
 
-@pytest.mark.integration
 class TestTLSEncryption:
     """Verify TLS encryption fields are populated on hub connections.
 
-    These tests require network access and a live hub that supports TLS.
-    The default hub uses nmdcs:// (NMDC over TLS).
+    These tests connect to a live TLS hub and check that the HubInfo
+    struct exposes isSecure, isTrusted, and cipherName.  The default hub
+    is ``nmdcs://wintermute.sublevels.net:411``; override with the
+    ``TEST_HUB_URL`` environment variable.
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.skipif(
-        "CI" not in os.environ and "TEST_HUB_URL" not in os.environ,
-        reason="TLS tests need network access; set TEST_HUB_URL or run in CI",
-    )
     async def test_hub_tls_fields_populated(self, async_client):
         """Connect to a TLS hub and verify isSecure/cipherName are set."""
+        import random
+        import string
+
+        # Use a unique nick to avoid conflicts with other test runs
+        suffix = "".join(random.choices(string.digits, k=4))
+        async_client._sync_client.set_setting("Nick", f"TLSTest_{suffix}")
+
         await async_client.connect(HUB_URL)
         try:
-            # Wait for the connection to establish
             await async_client.wait_connected(HUB_URL, timeout=30)
-            await asyncio.sleep(2)  # let cipher info propagate
+            # Give the cipher info a moment to propagate
+            await asyncio.sleep(2)
 
             hubs = async_client.list_hubs()
             assert len(hubs) > 0, "Should have at least one hub"
