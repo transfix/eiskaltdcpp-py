@@ -887,6 +887,24 @@ cp eiskaltdcpp/data/luascripts/*.lua ~/.eiskaltdcpp-py/scripts/
 eispy lua ls
 ```
 
+This project also includes purpose-built examples in `examples/lua/`:
+
+| Script | Description |
+|--------|-------------|
+| [`chat_logger.lua`](examples/lua/chat_logger.lua) | Log all hub chat to timestamped daily files |
+| [`auto_greet.lua`](examples/lua/auto_greet.lua) | Welcome users on join with configurable messages |
+| [`chat_commands.lua`](examples/lua/chat_commands.lua) | Custom `/slash` command framework (calc, dice, hubinfo, etc.) |
+| [`hub_monitor.lua`](examples/lua/hub_monitor.lua) | Track hub events, user counts, peak stats |
+| [`spam_filter.lua`](examples/lua/spam_filter.lua) | Block messages matching configurable keyword patterns |
+
+```bash
+# Run an example directly
+eispy lua eval-file examples/lua/chat_logger.lua
+
+# Or install to the scripts directory
+cp examples/lua/*.lua ~/.eiskaltdcpp-py/scripts/
+```
+
 ### Lua API available to scripts
 
 When the full ScriptManager is initialized, Lua scripts have access to
@@ -1009,7 +1027,13 @@ eiskaltdcpp-py/
 │   ├── file_list_browser.py    # File list browsing example
 │   ├── download_progress.py    # Transfer progress dashboard
 │   ├── share_manager.py        # Share management example
-│   └── multi_hub_bot.py        # Multi-hub bot example
+│   ├── multi_hub_bot.py        # Multi-hub bot example
+│   └── lua/                    # Lua scripting examples
+│       ├── chat_logger.lua     # Log hub chat to daily files
+│       ├── auto_greet.lua      # Welcome users on join
+│       ├── chat_commands.lua   # Custom /slash command framework
+│       ├── hub_monitor.lua     # Track hub events & user counts
+│       └── spam_filter.lua     # Block messages by keyword pattern
 ├── src/
 │   ├── CMakeLists.txt          # Static bridge library
 │   ├── bridge.h                # DCBridge class header
