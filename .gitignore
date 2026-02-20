@@ -13,6 +13,11 @@ swig/*_wrap.cpp
 swig/*.py
 !swig/*.i
 
+# SWIG build artifacts symlinked into source tree for dev/poetry installs
+python/eiskaltdcpp/dc_core.py
+python/eiskaltdcpp/_dc_core.so
+python/eiskaltdcpp/_version.py
+
 # Python
 __pycache__/
 *.py[cod]
