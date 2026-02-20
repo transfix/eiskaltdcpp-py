@@ -214,9 +214,25 @@ python examples/remote_client.py --url http://localhost:8080 --user admin --pass
 
 After installing the package (or with `PYTHONPATH=build/python`), a unified
 `eispy` command is available.  It can launch the DC daemon, the REST
-API, or both — in the foreground (attached) or as a background daemon.
+API, or both — and interactively control a running daemon from the
+command line.
 
-### Subcommands
+### Global options
+
+Every `eispy` invocation accepts these connection options so you can
+talk to **any** running daemon, local or remote:
+
+```bash
+eispy --url http://10.0.0.5:8080 --user admin --pass s3cret hub ls
+```
+
+| Flag | Env variable | Default | Description |
+|------|-------------|---------|-------------|
+| `--url` | `EISPY_URL` | `http://127.0.0.1:8080` | API base URL |
+| `--user` | `EISPY_USER` | `admin` | API username |
+| `--pass` | `EISPY_PASS` | `changeme` | API password |
+
+### Server commands
 
 | Command  | Description |
 |----------|-------------|
@@ -225,8 +241,6 @@ API, or both — in the foreground (attached) or as a background daemon.
 | `up`     | Launch **both** daemon + API in a single process |
 | `stop`   | Send SIGTERM to a detached instance (via PID file) |
 | `status` | Check whether a detached instance is running |
-
-### Quick start
 
 ```bash
 # Launch the DC daemon attached (stdout/stderr to terminal)
@@ -247,9 +261,127 @@ eispy status
 eispy stop
 ```
 
-### Environment variables
+### Remote operation commands
 
-All options can also be set via environment variables:
+Once a daemon is running (locally or on a remote host), you can drive
+**every** client operation from the `eispy` CLI.  All remote commands
+communicate with the daemon over the REST API via `RemoteDCClient`.
+
+#### Hub management (`eispy hub`)
+
+```bash
+eispy hub connect dchub://hub.example.com:411        # join a hub
+eispy hub connect dchub://hub.example.com --encoding CP1252
+eispy hub disconnect dchub://hub.example.com:411      # leave
+eispy hub ls                                          # list connected hubs (JSON)
+eispy hub users dchub://hub.example.com:411           # list users on a hub
+```
+
+#### Chat (`eispy chat`)
+
+```bash
+eispy chat send dchub://hub.example.com "Hello world"   # public chat
+eispy chat pm dchub://hub.example.com SomeNick "Hi"     # private message
+eispy chat history                                       # recent messages
+eispy chat history --hub dchub://hub.example.com --limit 50
+```
+
+#### Search (`eispy search`)
+
+```bash
+eispy search query "ubuntu iso"                  # search all hubs
+eispy search query "photo" --file-type 7         # search for pictures
+eispy search query "data" --hub dchub://hub:411  # restrict to one hub
+eispy search results                              # view results (table)
+eispy search results --json                       # machine-readable output
+eispy search clear                                # discard results
+```
+
+**File types:** 0 = any, 1 = audio, 2 = compressed, 3 = document,
+4 = executable, 5 = picture, 6 = video, 7 = directory, 8 = TTH.
+
+#### Download queue (`eispy queue`)
+
+```bash
+eispy queue ls                                    # show queued downloads
+eispy queue ls --json
+eispy queue add /tmp/downloads file.txt 1048576 ABCDEF1234567890  # by TTH
+eispy queue add-magnet "magnet:?xt=urn:tree:tiger:..." /tmp/downloads
+eispy queue priority /tmp/downloads/file.txt highest
+eispy queue rm /tmp/downloads/file.txt
+eispy queue clear
+```
+
+**Priority values:** `paused`, `lowest`, `low`, `normal`, `high`, `highest`.
+
+#### Shares (`eispy share`)
+
+```bash
+eispy share ls                                    # list shared directories
+eispy share add /home/user/shared MyFiles         # add a share
+eispy share rm MyFiles                            # remove by virtual name
+eispy share refresh                               # re-hash all shares
+eispy share size                                  # total share size + file count
+```
+
+#### Settings (`eispy setting`)
+
+```bash
+eispy setting get Nick                            # read a dcpp setting
+eispy setting set Nick "MyBot"                    # change a setting
+eispy setting reload                              # reload config from disk
+eispy setting networking                          # rebind listen ports
+```
+
+#### Transfers & hashing (`eispy transfer`)
+
+```bash
+eispy transfer stats                              # download/upload speed, totals
+eispy transfer hash-status                        # hashing progress
+eispy transfer pause-hash                         # pause hashing
+eispy transfer resume-hash                        # resume hashing
+```
+
+#### File-list browsing (`eispy filelist`)
+
+```bash
+eispy filelist request dchub://hub.example.com SomeUser  # request file list
+eispy filelist ls dchub://hub.example.com SomeUser       # list root directory
+eispy filelist ls dchub://hub.example.com SomeUser /Music
+eispy filelist browse dchub://hub.example.com SomeUser   # interactive tree walk
+eispy filelist download dchub://hub.example.com SomeUser \
+      /Music/song.mp3 /tmp/downloads                     # download a file
+eispy filelist download-dir dchub://hub.example.com SomeUser \
+      /Music /tmp/downloads                              # download entire dir
+eispy filelist close dchub://hub.example.com SomeUser    # free memory
+```
+
+#### API user management (`eispy user`)
+
+```bash
+eispy user ls                                     # list API accounts
+eispy user create viewer p@ssword --role readonly  # create account
+eispy user update viewer --role admin              # change role
+eispy user rm viewer                               # delete account
+```
+
+#### Real-time events (`eispy events`)
+
+```bash
+eispy events                                      # all events
+eispy events --channels chat,search               # only chat + search
+eispy --url http://10.0.0.5:8080 events           # from a remote daemon
+```
+
+Events stream until Ctrl-C.
+
+#### Remote shutdown (`eispy shutdown`)
+
+```bash
+eispy shutdown                                    # gracefully stop daemon+API
+```
+
+### Daemon environment variables
 
 | Variable | Option |
 |---|---|
@@ -268,9 +400,13 @@ All options can also be set via environment variables:
 ### Full option reference
 
 ```
+eispy --help
 eispy daemon -h
 eispy api -h
 eispy up -h
+eispy hub -h
+eispy search -h
+eispy queue -h
 ```
 
 ## REST API
@@ -435,6 +571,267 @@ async def main():
 
 See [`examples/remote_client.py`](examples/remote_client.py) for a complete
 runnable script.
+
+## Practical workflows
+
+Direct Connect operations are inherently **asynchronous** — you issue a
+request and results arrive some time later (seconds to minutes depending on
+network conditions and hub size).  The sections below walk through the most
+common multi-step workflows and call out the timing pitfalls we discovered
+while running integration tests against live hubs.
+
+### Browsing a user's shared files
+
+Before you can download individual files from another user you first need
+their **file list** (an XML index of everything they share).  This is a
+two-phase process:
+
+1. **Request** the file list — the hub tells the remote client to send it.
+2. **Wait** for it to arrive, then **browse** or **download** from it.
+
+```bash
+# CLI — start the daemon in the background
+eispy up -d --hub dchub://hub.example.com:411 --admin-pass s3cret
+
+# Request a specific user's file list
+eispy filelist request dchub://hub.example.com SomeUser
+
+# Wait a few seconds for the transfer to complete, then list the root
+eispy filelist ls dchub://hub.example.com SomeUser
+
+# Drill into a subdirectory
+eispy filelist ls dchub://hub.example.com SomeUser /Music/Rock
+
+# Interactive tree walk — prints dirs and files at each level,
+# prompts you to pick a directory to descend into
+eispy filelist browse dchub://hub.example.com SomeUser
+
+# Download a single file
+eispy filelist download dchub://hub.example.com SomeUser \
+      /Music/Rock/song.flac /tmp/downloads
+
+# Download an entire directory (recursive)
+eispy filelist download-dir dchub://hub.example.com SomeUser \
+      /Music/Rock /tmp/downloads
+
+# Free memory when done
+eispy filelist close dchub://hub.example.com SomeUser
+```
+
+Programmatically with `AsyncDCClient`:
+
+```python
+from eiskaltdcpp import AsyncDCClient
+import asyncio, time
+
+async def browse_user():
+    async with AsyncDCClient("/tmp/dc-config") as client:
+        client.connect("dchub://hub.example.com:411")
+
+        # Wait for the hub connection and user list to populate
+        await asyncio.sleep(5)
+
+        # Request the file list
+        client.request_filelist("dchub://hub.example.com", "SomeUser")
+
+        # File lists can take a while on slow connections
+        for _ in range(30):
+            await asyncio.sleep(1)
+            items = client.list_filelist("dchub://hub.example.com",
+                                         "SomeUser", "/")
+            if items:
+                break
+
+        for item in items:
+            kind = "DIR " if item.get("is_directory") else "FILE"
+            print(f"  {kind} {item['name']}  ({item.get('size', '')})")
+
+        # Download a file from the list
+        client.download_filelist_entry(
+            "dchub://hub.example.com", "SomeUser",
+            "/Music/song.flac", "/tmp/downloads",
+        )
+```
+
+### Search → download workflow
+
+Searching is broadcast to every connected hub.  Results trickle in over
+several seconds as remote clients reply.
+
+```bash
+# Start a search
+eispy search query "ubuntu server iso"
+
+# Wait 5-10 seconds for results to arrive
+sleep 5
+eispy search results
+
+# Results include file name, size, TTH hash, and source nick.
+# Queue a download using the TTH from the results:
+eispy queue add /tmp/downloads ubuntu-24.04-live-server-amd64.iso \
+      4700000000 ABCDEF1234567890ABCDEF1234567890ABCDEFGH
+
+# Monitor progress
+eispy transfer stats
+eispy queue ls
+```
+
+Programmatically:
+
+```python
+client.search("ubuntu iso")
+time.sleep(5)
+
+results = client.get_search_results()
+for r in results:
+    print(f"{r.fileName} ({r.fileSize} bytes) TTH:{r.tth} from {r.nick}")
+
+# Queue the best match
+best = results[0]
+client.download("/tmp/downloads", best.fileName, best.fileSize, best.tth)
+```
+
+### Download queue management
+
+The download queue persists across restarts.  Every queued item has a
+**target** path (local destination) which is its unique identifier.
+
+```bash
+# List everything in the queue
+eispy queue ls --json
+
+# Add by magnet link (typically copied from a web page or chat)
+eispy queue add-magnet \
+  "magnet:?xt=urn:tree:tiger:ABCDEF...&dn=file.zip&xl=1048576" \
+  /tmp/downloads
+
+# Prioritize an important download
+eispy queue priority /tmp/downloads/file.zip highest
+
+# Remove a stalled item
+eispy queue rm /tmp/downloads/file.zip
+
+# Nuclear option — drop everything
+eispy queue clear
+```
+
+### Share management and hashing
+
+When you add a directory to your shares, dcpp must **hash** every file
+(Tiger Tree Hash) before it can be offered to other users.  On large
+shares this can take hours on first run.  Subsequent runs are incremental.
+
+```bash
+# Add a share
+eispy share add /home/user/Videos Videos
+
+# Trigger a full re-scan
+eispy share refresh
+
+# Watch hashing progress
+eispy transfer hash-status   # files_left, bytes_left, current_file
+
+# Pause hashing (e.g. to reduce disk I/O during a download)
+eispy transfer pause-hash
+eispy transfer resume-hash
+
+# Check total share size
+eispy share size
+```
+
+## Hashing and timing notes
+
+These are practical lessons learned from integration testing (against
+live hubs such as `wintermute.sublevels.net`) and from the automated CI
+test suite.
+
+### `HashingStartDelay`
+
+By default dcpp waits **a few seconds** after initialization before it
+begins hashing.  For automated tests or short-lived scripts this delay
+means the client might shut down before hashing even starts.
+
+Set the setting to `0` as early as possible:
+
+```python
+client.set_setting("HashingStartDelay", "0")
+```
+
+Or via the CLI:
+
+```bash
+eispy setting set HashingStartDelay 0
+```
+
+### File list timing
+
+`request_filelist()` is **non-blocking** — it sends a request to the
+remote user and returns immediately.  The actual XML file list arrives
+asynchronously via a peer-to-peer transfer.  In integration tests we use
+a retry loop with exponential back-off:
+
+```python
+for attempt in range(15):
+    items = client.list_filelist(hub_url, nick, "/")
+    if items:
+        break
+    await asyncio.sleep(min(2 ** attempt * 0.5, 10))
+else:
+    raise TimeoutError("File list never arrived")
+```
+
+Common reasons a file list fails to arrive:
+
+- **User went offline** between the request and the transfer.
+- **Passive-passive** — both sides are behind NAT with no port forwarding.
+  Use `eispy setting networking` (calls `start_networking()`) to bind
+  listen ports, or set `IncomingConnections` to an appropriate mode.
+- **Slow connection** — large shares can produce multi-megabyte file lists
+  that take a while to transfer and decompress.
+
+### Networking modes
+
+dcpp supports three connection modes:
+
+| `IncomingConnections` | Meaning |
+|-----------------------|---------|
+| `0` (Passive/Firewall) | Cannot accept incoming — relies on the other side |
+| `1` (Direct/Active) | Listens on `InPort` / `TLSPort` |
+| `2` (UPnP) | Tries automatic port mapping via UPnP |
+
+For reliable file transfers (especially file-list requests), set Active:
+
+```bash
+eispy setting set IncomingConnections 1
+eispy setting networking   # apply immediately
+```
+
+### Search result timing
+
+Results begin arriving **1–5 seconds** after issuing a search and may
+continue trickling in for 10+ seconds depending on hub size.  Searching
+too often triggers **flood protection** on many hubs — a 15–30 second
+cooldown between searches is recommended.
+
+### Hashing before sharing
+
+Until hashing completes, files in your shares will not appear in other
+users' search results.  If you add a share and immediately search for
+your own files, you may see zero results.  Monitor `hash-status` and
+wait for `files_left == 0`.
+
+### Hub `nick_taken` and reconnection
+
+If your chosen nick is already in use on the hub, the daemon receives a
+`hub_nick_taken` event and the connection fails.  When running
+automated tests with multiple clients, use unique nicks (e.g. append a
+random suffix):
+
+```python
+import random, string
+suffix = ''.join(random.choices(string.digits, k=4))
+client.set_setting("Nick", f"TestBot_{suffix}")
+```
 
 ## Project structure
 

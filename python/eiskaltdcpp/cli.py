@@ -1,32 +1,53 @@
 """
 Unified CLI for eiskaltdcpp-py.
 
-Provides subcommands to launch the DC daemon, the REST API, or both.
-Each can run in the foreground (attached) or detached (daemonised).
+Provides subcommands to launch the DC daemon, the REST API, or both,
+**and** to interact with a running instance via the REST API.
 
 Usage::
 
-    # Launch daemon attached (stdout/stderr to terminal)
-    eispy daemon --config-dir /var/lib/dc
+    # Launch daemon + API together
+    eispy up --hub dchub://hub.example.com:411 --admin-pass s3cret
 
-    # Launch daemon detached
-    eispy daemon -d --config-dir /var/lib/dc --log-file /var/log/dc.log
+    # --- Remote operations (talk to a running daemon) ---
 
-    # Launch API attached
-    eispy api --admin-pass s3cret --port 9000
+    # Connect to a hub
+    eispy hub connect dchub://hub.example.com:411
 
-    # Launch both daemon + API detached
-    eispy up -d --admin-pass s3cret --config-dir /var/lib/dc
+    # List connected hubs
+    eispy hub ls
 
-    # Stop a detached process
-    eispy stop --pid-file /var/run/eiskaltdcpp.pid
+    # List users on a hub
+    eispy hub users dchub://hub.example.com:411
 
-    # Show status of running instance
-    eispy status
+    # Search
+    eispy search query "ubuntu iso"
+    eispy search results
+
+    # Queue
+    eispy queue ls
+    eispy queue add-magnet "magnet:?xt=urn:tree:tiger:..."
+
+    # Shares
+    eispy share ls
+    eispy share add /data/movies Movies
+
+    # Settings
+    eispy setting get Nick
+    eispy setting set Nick MyBot
+
+    # Transfers
+    eispy transfer stats
+    eispy transfer hash-status
+
+    # Connect to a remote (non-local) daemon
+    eispy --url http://10.0.0.5:8080 --user admin --pass s3cret hub ls
 """
 from __future__ import annotations
 
+import asyncio
 import atexit
+import json
 import logging
 import os
 import signal
@@ -39,9 +60,10 @@ import click
 
 logger = logging.getLogger("eiskaltdcpp.cli")
 
-# Default paths
+# Default paths / URLs
 DEFAULT_PID_FILE = "/tmp/eiskaltdcpp.pid"
 DEFAULT_LOG_FILE = ""  # empty = stdout/stderr
+DEFAULT_API_URL = "http://localhost:8080"
 
 
 # ============================================================================
@@ -415,22 +437,61 @@ def _api_options(fn):
     context_settings={"help_option_names": ["-h", "--help"]},
 )
 @click.version_option(package_name="eiskaltdcpp-py", prog_name="eispy")
-def cli():
+@click.option(
+    "--url", default="", envvar="EISPY_URL",
+    help=f"API server URL (default: {DEFAULT_API_URL}). Env: EISPY_URL",
+)
+@click.option(
+    "--user", "api_user", default="", envvar="EISPY_USER",
+    help="API username. Env: EISPY_USER",
+)
+@click.option(
+    "--pass", "api_pass", default="", envvar="EISPY_PASS",
+    help="API password. Env: EISPY_PASS",
+)
+@click.pass_context
+def cli(ctx, url, api_user, api_pass):
     """eispy — eiskaltdcpp-py DC client daemon and REST API.
 
-    Launch the DC client daemon, the REST API, or both from a single
-    command.  Each mode supports running attached (foreground) or
-    detached (background daemon).
+    \b
+    Service commands:
+      eispy daemon   Launch the DC client daemon
+      eispy api      Launch the REST API server
+      eispy up       Launch both daemon + API together
+      eispy stop     Stop a detached process
+      eispy status   Show status of a running instance
+
+    \b
+    Remote operations (talk to a running daemon via REST API):
+      eispy hub      Hub connections (connect, disconnect, list, users)
+      eispy chat     Chat messages (send, pm, history)
+      eispy search   Search the DC network (query, results, clear)
+      eispy queue    Download queue (ls, add, add-magnet, rm, clear, priority)
+      eispy share    Shared directories (ls, add, rm, refresh, size)
+      eispy setting  Settings (get, set, reload, networking)
+      eispy transfer Transfer and hashing status
+      eispy filelist Browse user file lists (request, ls, browse, download)
+
+    \b
+    Remote connection options (for remote operations):
+      --url    API server URL (default: http://localhost:8080)
+      --user   API username
+      --pass   API password
+      These can also be set via EISPY_URL, EISPY_USER, EISPY_PASS env vars.
 
     \b
     Examples:
-      eispy daemon --hub dchub://hub.example.com:411
-      eispy api --admin-pass s3cret --port 9000
-      eispy up --hub dchub://hub.example.com:411 --admin-pass s3cret
-      eispy up -d --log-file /var/log/eiskaltdcpp.log
-      eispy stop
-      eispy status
+      eispy up --hub dchub://hub:411 --admin-pass s3cret
+      eispy hub ls
+      eispy --url http://10.0.0.5:8080 --user admin --pass s3cret hub ls
+      eispy search query "ubuntu iso" --hub dchub://hub:411
+      eispy queue ls
+      eispy share add /data/movies Movies
     """
+    ctx.ensure_object(dict)
+    ctx.obj["api_url"] = url or DEFAULT_API_URL
+    ctx.obj["api_user"] = api_user
+    ctx.obj["api_pass"] = api_pass
 
 
 @cli.command()
@@ -588,6 +649,939 @@ def status(pid_file, api_url):
             click.echo(f"API server: OK (version {data.get('version', '?')})")
         except Exception as exc:
             click.echo(f"API server: unreachable ({exc})")
+
+
+# ============================================================================
+# Remote-operation helpers
+# ============================================================================
+
+def _get_remote_client(ctx: click.Context):
+    """Create a RemoteDCClient from CLI context (lazy import)."""
+    from eiskaltdcpp.api.client import RemoteDCClient
+
+    url = ctx.obj["api_url"]
+    user = ctx.obj["api_user"]
+    password = ctx.obj["api_pass"]
+    return RemoteDCClient(url, username=user, password=password)
+
+
+def _run(coro):
+    """Run an async coroutine in a new event loop."""
+    return asyncio.run(coro)
+
+
+def _print_json(data):
+    """Print data as formatted JSON."""
+    click.echo(json.dumps(data, indent=2, default=str))
+
+
+def _print_table(rows: list[dict], columns: list[str] | None = None):
+    """Print a list of dicts as a simple aligned table."""
+    if not rows:
+        click.echo("(empty)")
+        return
+    if columns is None:
+        columns = list(rows[0].keys())
+    # Compute column widths
+    widths = {c: max(len(c), *(len(str(r.get(c, ""))) for r in rows)) for c in columns}
+    header = "  ".join(c.ljust(widths[c]) for c in columns)
+    click.echo(header)
+    click.echo("  ".join("-" * widths[c] for c in columns))
+    for row in rows:
+        line = "  ".join(str(row.get(c, "")).ljust(widths[c]) for c in columns)
+        click.echo(line)
+
+
+def _obj_to_dict(obj) -> dict:
+    """Convert a dataclass or object with __dict__ to a plain dict."""
+    if hasattr(obj, "__dataclass_fields__"):
+        from dataclasses import asdict
+        return asdict(obj)
+    if hasattr(obj, "__dict__"):
+        return {k: v for k, v in obj.__dict__.items() if not k.startswith("_")}
+    return {"value": str(obj)}
+
+
+def _format_size(n: int) -> str:
+    """Human-readable file size."""
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if abs(n) < 1024.0:
+            return f"{n:.1f} {unit}"
+        n /= 1024.0
+    return f"{n:.1f} PiB"
+
+
+# ============================================================================
+# hub — Hub connections
+# ============================================================================
+
+@cli.group()
+def hub():
+    """Manage hub connections.
+
+    \b
+    Examples:
+      eispy hub connect dchub://hub.example.com:411
+      eispy hub disconnect dchub://hub.example.com:411
+      eispy hub ls
+      eispy hub users dchub://hub.example.com:411
+    """
+
+
+@hub.command("connect")
+@click.argument("url")
+@click.option("--encoding", default="", help="Text encoding (e.g. CP1252).")
+@click.pass_context
+def hub_connect(ctx, url, encoding):
+    """Connect to a DC hub."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            await client.connect(url, encoding)
+            click.echo(f"Connected to {url}")
+    _run(_do())
+
+
+@hub.command("disconnect")
+@click.argument("url")
+@click.pass_context
+def hub_disconnect(ctx, url):
+    """Disconnect from a DC hub."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            await client.disconnect(url)
+            click.echo(f"Disconnected from {url}")
+    _run(_do())
+
+
+@hub.command("ls")
+@click.pass_context
+def hub_list(ctx):
+    """List connected hubs."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            hubs = await client.list_hubs_async()
+            if not hubs:
+                click.echo("No hubs connected")
+                return
+            rows = [_obj_to_dict(h) for h in hubs]
+            _print_table(rows, ["url", "name", "user_count"])
+    _run(_do())
+
+
+@hub.command("users")
+@click.argument("hub_url")
+@click.pass_context
+def hub_users(ctx, hub_url):
+    """List users on a hub."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            users = await client.get_users_async(hub_url)
+            if not users:
+                click.echo("No users found")
+                return
+            rows = [_obj_to_dict(u) for u in users]
+            cols = ["nick", "share_size", "hub_url"]
+            # Use whatever columns are available
+            if rows:
+                available = list(rows[0].keys())
+                cols = [c for c in cols if c in available] or available[:5]
+            _print_table(rows, cols)
+    _run(_do())
+
+
+# ============================================================================
+# chat — Chat messages
+# ============================================================================
+
+@cli.group()
+def chat():
+    """Send and read chat messages.
+
+    \b
+    Examples:
+      eispy chat send dchub://hub:411 "Hello everyone!"
+      eispy chat pm dchub://hub:411 SomeUser "Hi there"
+      eispy chat history dchub://hub:411
+    """
+
+
+@chat.command("send")
+@click.argument("hub_url")
+@click.argument("message")
+@click.pass_context
+def chat_send(ctx, hub_url, message):
+    """Send a public chat message to a hub."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            await client.send_message_async(hub_url, message)
+            click.echo("Message sent")
+    _run(_do())
+
+
+@chat.command("pm")
+@click.argument("hub_url")
+@click.argument("nick")
+@click.argument("message")
+@click.pass_context
+def chat_pm(ctx, hub_url, nick, message):
+    """Send a private message to a user."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            await client.send_pm_async(hub_url, nick, message)
+            click.echo(f"PM sent to {nick}")
+    _run(_do())
+
+
+@chat.command("history")
+@click.argument("hub_url")
+@click.option("-n", "--lines", default=50, help="Max lines to retrieve.")
+@click.pass_context
+def chat_history(ctx, hub_url, lines):
+    """Show chat history for a hub."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            history = await client.get_chat_history_async(hub_url, max_lines=lines)
+            for line in history:
+                click.echo(line)
+    _run(_do())
+
+
+# ============================================================================
+# search — Search the DC network
+# ============================================================================
+
+@cli.group()
+def search():
+    """Search the DC network for files.
+
+    \b
+    Examples:
+      eispy search query "ubuntu iso"
+      eispy search query "movie.mkv" --type 1 --hub dchub://hub:411
+      eispy search results
+      eispy search results --json
+      eispy search clear
+    """
+
+
+@search.command("query")
+@click.argument("terms")
+@click.option("--type", "file_type", default=0, type=int,
+              help="File type (0=any, 1=audio, 2=compressed, 3=document, "
+                   "4=executable, 5=picture, 6=video, 7=directory, 8=TTH).")
+@click.option("--size-mode", default=0, type=int,
+              help="Size filter mode (0=at least, 1=at most, 2=exact).")
+@click.option("--size", default=0, type=int, help="Size filter value in bytes.")
+@click.option("--hub", "hub_url", default="", help="Limit to a specific hub.")
+@click.pass_context
+def search_query(ctx, terms, file_type, size_mode, size, hub_url):
+    """Search for files on connected hubs."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            ok = await client.search_async(
+                terms, file_type=file_type, size_mode=size_mode,
+                size=size, hub_url=hub_url,
+            )
+            if ok:
+                click.echo(f"Search sent: {terms}")
+                click.echo("Use 'eispy search results' to view results (allow a few seconds).")
+            else:
+                click.echo("Search failed", err=True)
+                raise SystemExit(1)
+    _run(_do())
+
+
+@search.command("results")
+@click.option("--hub", "hub_url", default="", help="Filter by hub URL.")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+@click.pass_context
+def search_results(ctx, hub_url, as_json):
+    """Show search results."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            results = await client.get_search_results_async(hub_url)
+            if as_json:
+                _print_json([_obj_to_dict(r) for r in results])
+            elif not results:
+                click.echo("No results")
+            else:
+                rows = [_obj_to_dict(r) for r in results]
+                cols = ["filename", "size", "tth", "nick", "hub_url"]
+                available = list(rows[0].keys()) if rows else []
+                cols = [c for c in cols if c in available] or available[:5]
+                _print_table(rows, cols)
+    _run(_do())
+
+
+@search.command("clear")
+@click.option("--hub", "hub_url", default="", help="Clear for specific hub only.")
+@click.pass_context
+def search_clear(ctx, hub_url):
+    """Clear search results."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            await client.clear_search_results_async(hub_url)
+            click.echo("Search results cleared")
+    _run(_do())
+
+
+# ============================================================================
+# queue — Download queue
+# ============================================================================
+
+@cli.group()
+def queue():
+    """Manage the download queue.
+
+    \b
+    Examples:
+      eispy queue ls
+      eispy queue ls --json
+      eispy queue add-magnet "magnet:?xt=urn:tree:tiger:..."
+      eispy queue add --dir /path --name file.txt --size 1024 --tth ABC123
+      eispy queue rm /path/to/target
+      eispy queue clear
+      eispy queue priority /path/to/target 4
+    """
+
+
+@queue.command("ls")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+@click.pass_context
+def queue_list(ctx, as_json):
+    """List items in the download queue."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            items = await client.list_queue_async()
+            if as_json:
+                _print_json([_obj_to_dict(i) for i in items])
+            elif not items:
+                click.echo("Queue is empty")
+            else:
+                rows = [_obj_to_dict(i) for i in items]
+                cols = ["target", "size", "downloaded", "priority", "tth"]
+                available = list(rows[0].keys()) if rows else []
+                cols = [c for c in cols if c in available] or available[:5]
+                _print_table(rows, cols)
+    _run(_do())
+
+
+@queue.command("add")
+@click.option("--dir", "directory", required=True, help="Remote directory path.")
+@click.option("--name", required=True, help="File name.")
+@click.option("--size", required=True, type=int, help="File size in bytes.")
+@click.option("--tth", required=True, help="TTH hash.")
+@click.option("--hub", "hub_url", default="", help="Hub URL (for source hint).")
+@click.option("--nick", default="", help="Source nick.")
+@click.pass_context
+def queue_add(ctx, directory, name, size, tth, hub_url, nick):
+    """Add a file to the download queue by details."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            ok = await client.download_async(
+                directory, name, size, tth, hub_url=hub_url, nick=nick,
+            )
+            if ok:
+                click.echo(f"Queued: {name}")
+            else:
+                click.echo("Failed to add to queue", err=True)
+                raise SystemExit(1)
+    _run(_do())
+
+
+@queue.command("add-magnet")
+@click.argument("magnet")
+@click.option("--download-dir", default="", help="Download directory override.")
+@click.pass_context
+def queue_add_magnet(ctx, magnet, download_dir):
+    """Add a magnet link to the download queue."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            ok = await client.download_magnet_async(magnet, download_dir)
+            if ok:
+                click.echo("Magnet queued")
+            else:
+                click.echo("Failed to add magnet", err=True)
+                raise SystemExit(1)
+    _run(_do())
+
+
+@queue.command("rm")
+@click.argument("target")
+@click.pass_context
+def queue_remove(ctx, target):
+    """Remove an item from the download queue."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            await client.remove_download_async(target)
+            click.echo(f"Removed: {target}")
+    _run(_do())
+
+
+@queue.command("clear")
+@click.pass_context
+def queue_clear(ctx):
+    """Clear the entire download queue."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            await client.clear_queue_async()
+            click.echo("Queue cleared")
+    _run(_do())
+
+
+@queue.command("priority")
+@click.argument("target")
+@click.argument("level", type=int)
+@click.pass_context
+def queue_priority(ctx, target, level):
+    """Set download priority for a queued item.
+
+    Priority levels: 0=paused, 1=lowest, 2=low, 3=normal, 4=high, 5=highest.
+    """
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            await client.set_priority_async(target, level)
+            click.echo(f"Priority set to {level}")
+    _run(_do())
+
+
+# ============================================================================
+# share — Shared directories
+# ============================================================================
+
+@cli.group()
+def share():
+    """Manage shared directories.
+
+    \b
+    Examples:
+      eispy share ls
+      eispy share add /data/movies Movies
+      eispy share rm /data/movies
+      eispy share refresh
+      eispy share size
+    """
+
+
+@share.command("ls")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+@click.pass_context
+def share_list(ctx, as_json):
+    """List shared directories."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            shares = await client.list_shares_async()
+            if as_json:
+                _print_json([_obj_to_dict(s) for s in shares])
+            elif not shares:
+                click.echo("No shares configured")
+            else:
+                rows = [_obj_to_dict(s) for s in shares]
+                cols = ["virtual_name", "real_path", "size"]
+                available = list(rows[0].keys()) if rows else []
+                cols = [c for c in cols if c in available] or available[:4]
+                _print_table(rows, cols)
+    _run(_do())
+
+
+@share.command("add")
+@click.argument("real_path")
+@click.argument("virtual_name")
+@click.pass_context
+def share_add(ctx, real_path, virtual_name):
+    """Share a directory with a virtual name.
+
+    \b
+    Example: eispy share add /data/movies Movies
+    """
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            ok = await client.add_share_async(real_path, virtual_name)
+            if ok:
+                click.echo(f"Shared: {real_path} as '{virtual_name}'")
+            else:
+                click.echo("Failed to add share", err=True)
+                raise SystemExit(1)
+    _run(_do())
+
+
+@share.command("rm")
+@click.argument("real_path")
+@click.pass_context
+def share_remove(ctx, real_path):
+    """Remove a shared directory."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            ok = await client.remove_share_async(real_path)
+            if ok:
+                click.echo(f"Removed share: {real_path}")
+            else:
+                click.echo("Failed to remove share", err=True)
+                raise SystemExit(1)
+    _run(_do())
+
+
+@share.command("refresh")
+@click.pass_context
+def share_refresh(ctx):
+    """Refresh the file hash list for all shares."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            await client.refresh_share_async()
+            click.echo("Share refresh started")
+    _run(_do())
+
+
+@share.command("size")
+@click.pass_context
+def share_size(ctx):
+    """Show total share size and file count."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            size = await client.get_share_size()
+            files = await client.get_shared_files()
+            click.echo(f"Share size:  {_format_size(size)} ({size:,} bytes)")
+            click.echo(f"File count:  {files:,}")
+    _run(_do())
+
+
+# ============================================================================
+# setting — Settings management
+# ============================================================================
+
+@cli.group()
+def setting():
+    """Read and write DC client settings.
+
+    \b
+    Examples:
+      eispy setting get Nick
+      eispy setting set Nick MyBot
+      eispy setting set DownloadDirectory /data/downloads
+      eispy setting reload
+      eispy setting networking
+    """
+
+
+@setting.command("get")
+@click.argument("name")
+@click.pass_context
+def setting_get(ctx, name):
+    """Get the value of a setting."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            value = await client.get_setting_async(name)
+            click.echo(f"{name} = {value}")
+    _run(_do())
+
+
+@setting.command("set")
+@click.argument("name")
+@click.argument("value")
+@click.pass_context
+def setting_set(ctx, name, value):
+    """Set a setting value."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            await client.set_setting_async(name, value)
+            click.echo(f"{name} = {value}")
+    _run(_do())
+
+
+@setting.command("reload")
+@click.pass_context
+def setting_reload(ctx):
+    """Reload settings from config files."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            await client.reload_config_async()
+            click.echo("Config reloaded")
+    _run(_do())
+
+
+@setting.command("networking")
+@click.pass_context
+def setting_networking(ctx):
+    """Rebind network listeners (active mode ports, etc.)."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            await client.start_networking_async()
+            click.echo("Networking restarted")
+    _run(_do())
+
+
+# ============================================================================
+# transfer — Transfer stats and hashing
+# ============================================================================
+
+@cli.group()
+def transfer():
+    """View transfer statistics and hashing status.
+
+    \b
+    Examples:
+      eispy transfer stats
+      eispy transfer hash-status
+      eispy transfer pause-hash
+      eispy transfer resume-hash
+    """
+
+
+@transfer.command("stats")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+@click.pass_context
+def transfer_stats(ctx, as_json):
+    """Show current transfer statistics."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            stats = await client.get_transfer_stats()
+            d = _obj_to_dict(stats)
+            if as_json:
+                _print_json(d)
+            else:
+                for k, v in d.items():
+                    if "speed" in k.lower():
+                        click.echo(f"  {k}: {_format_size(int(v))}/s")
+                    elif "size" in k.lower() or "bytes" in k.lower():
+                        click.echo(f"  {k}: {_format_size(int(v))}")
+                    else:
+                        click.echo(f"  {k}: {v}")
+    _run(_do())
+
+
+@transfer.command("hash-status")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+@click.pass_context
+def transfer_hash_status(ctx, as_json):
+    """Show hashing progress."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            hs = await client.get_hash_status()
+            d = _obj_to_dict(hs)
+            if as_json:
+                _print_json(d)
+            else:
+                for k, v in d.items():
+                    if "bytes" in k.lower() or "size" in k.lower():
+                        click.echo(f"  {k}: {_format_size(int(v))}")
+                    else:
+                        click.echo(f"  {k}: {v}")
+    _run(_do())
+
+
+@transfer.command("pause-hash")
+@click.pass_context
+def transfer_pause_hash(ctx):
+    """Pause hashing."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            await client.pause_hashing_async(pause=True)
+            click.echo("Hashing paused")
+    _run(_do())
+
+
+@transfer.command("resume-hash")
+@click.pass_context
+def transfer_resume_hash(ctx):
+    """Resume hashing."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            await client.pause_hashing_async(pause=False)
+            click.echo("Hashing resumed")
+    _run(_do())
+
+
+# ============================================================================
+# filelist — File list browsing and downloads
+# ============================================================================
+
+@cli.group()
+def filelist():
+    """Browse user file lists and download from them.
+
+    File lists let you browse another user's shared files and selectively
+    download files or entire directories.
+
+    \b
+    Workflow:
+      1. Request a file list:  eispy filelist request dchub://hub:411 UserNick
+      2. List available lists:  eispy filelist ls
+      3. Browse:  eispy filelist browse <list-id> /
+      4. Download a file:  eispy filelist download <list-id> /path/to/file.txt
+      5. Download a dir:  eispy filelist download-dir <list-id> /Videos
+      6. Close:  eispy filelist close <list-id>
+
+    \b
+    Note: File list operations are performed via the local DC client
+    (not the REST API), since file lists are not yet exposed over HTTP.
+    This command requires the Python SWIG bindings to be available.
+    """
+
+
+@filelist.command("request")
+@click.argument("hub_url")
+@click.argument("nick")
+@click.option("--match-queue", is_flag=True, help="Match files against download queue.")
+@click.pass_context
+def filelist_request(ctx, hub_url, nick, match_queue):
+    """Request a user's file list."""
+    from eiskaltdcpp import AsyncDCClient
+
+    async def _do():
+        # For file list ops we need the direct client, not the remote API
+        config_dir = os.environ.get("EISKALTDCPP_CONFIG_DIR", "")
+        async with AsyncDCClient(config_dir) as client:
+            ok = client.request_file_list(hub_url, nick, match_queue=match_queue)
+            if ok:
+                click.echo(f"File list requested from {nick}")
+                click.echo("Wait a moment, then use 'eispy filelist ls' to see available lists.")
+            else:
+                click.echo("Failed to request file list", err=True)
+                raise SystemExit(1)
+    _run(_do())
+
+
+@filelist.command("ls")
+@click.pass_context
+def filelist_list(ctx):
+    """List locally available file lists."""
+    from eiskaltdcpp import AsyncDCClient
+
+    async def _do():
+        config_dir = os.environ.get("EISKALTDCPP_CONFIG_DIR", "")
+        async with AsyncDCClient(config_dir) as client:
+            lists = client.list_local_file_lists()
+            if not lists:
+                click.echo("No file lists available")
+                return
+            click.echo("Available file lists:")
+            for fl in lists:
+                click.echo(f"  {fl}")
+    _run(_do())
+
+
+@filelist.command("browse")
+@click.argument("list_id")
+@click.option("--dir", "directory", default="/", help="Directory to browse (default: /).")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+@click.pass_context
+def filelist_browse(ctx, list_id, directory, as_json):
+    """Browse a file list directory."""
+    from eiskaltdcpp import AsyncDCClient
+
+    async def _do():
+        config_dir = os.environ.get("EISKALTDCPP_CONFIG_DIR", "")
+        async with AsyncDCClient(config_dir) as client:
+            if not client.open_file_list(list_id):
+                click.echo(f"Failed to open file list: {list_id}", err=True)
+                raise SystemExit(1)
+            try:
+                entries = client.browse_file_list(list_id, directory)
+                if as_json:
+                    _print_json([_obj_to_dict(e) for e in entries])
+                elif not entries:
+                    click.echo(f"Empty directory: {directory}")
+                else:
+                    rows = [_obj_to_dict(e) for e in entries]
+                    cols = ["name", "size", "tth", "type"]
+                    available = list(rows[0].keys()) if rows else []
+                    cols = [c for c in cols if c in available] or available[:5]
+                    _print_table(rows, cols)
+            finally:
+                client.close_file_list(list_id)
+    _run(_do())
+
+
+@filelist.command("download")
+@click.argument("list_id")
+@click.argument("file_path")
+@click.option("--to", "download_to", default="", help="Local download directory.")
+@click.pass_context
+def filelist_download(ctx, list_id, file_path, download_to):
+    """Download a file from a file list."""
+    from eiskaltdcpp import AsyncDCClient
+
+    async def _do():
+        config_dir = os.environ.get("EISKALTDCPP_CONFIG_DIR", "")
+        async with AsyncDCClient(config_dir) as client:
+            if not client.open_file_list(list_id):
+                click.echo(f"Failed to open file list: {list_id}", err=True)
+                raise SystemExit(1)
+            try:
+                ok = client.download_from_list(list_id, file_path, download_to)
+                if ok:
+                    click.echo(f"Queued download: {file_path}")
+                else:
+                    click.echo("Failed to queue download", err=True)
+                    raise SystemExit(1)
+            finally:
+                client.close_file_list(list_id)
+    _run(_do())
+
+
+@filelist.command("download-dir")
+@click.argument("list_id")
+@click.argument("dir_path")
+@click.option("--to", "download_to", default="", help="Local download directory.")
+@click.pass_context
+def filelist_download_dir(ctx, list_id, dir_path, download_to):
+    """Download an entire directory from a file list."""
+    from eiskaltdcpp import AsyncDCClient
+
+    async def _do():
+        config_dir = os.environ.get("EISKALTDCPP_CONFIG_DIR", "")
+        async with AsyncDCClient(config_dir) as client:
+            if not client.open_file_list(list_id):
+                click.echo(f"Failed to open file list: {list_id}", err=True)
+                raise SystemExit(1)
+            try:
+                ok = client.download_dir_from_list(list_id, dir_path, download_to)
+                if ok:
+                    click.echo(f"Queued directory download: {dir_path}")
+                else:
+                    click.echo("Failed to queue directory download", err=True)
+                    raise SystemExit(1)
+            finally:
+                client.close_file_list(list_id)
+    _run(_do())
+
+
+@filelist.command("close")
+@click.argument("list_id")
+@click.pass_context
+def filelist_close(ctx, list_id):
+    """Close an open file list."""
+    from eiskaltdcpp import AsyncDCClient
+
+    async def _do():
+        config_dir = os.environ.get("EISKALTDCPP_CONFIG_DIR", "")
+        async with AsyncDCClient(config_dir) as client:
+            client.close_file_list(list_id)
+            click.echo(f"File list closed: {list_id}")
+    _run(_do())
+
+
+# ============================================================================
+# user — API user management
+# ============================================================================
+
+@cli.group("user")
+def user_group():
+    """Manage API user accounts.
+
+    \b
+    Examples:
+      eispy user ls
+      eispy user create viewer p@ssword --role readonly
+      eispy user rm viewer
+    """
+
+
+@user_group.command("ls")
+@click.pass_context
+def user_list(ctx):
+    """List API user accounts."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            users = await client.list_users()
+            if not users:
+                click.echo("No users")
+                return
+            _print_table(users, ["username", "role"])
+    _run(_do())
+
+
+@user_group.command("create")
+@click.argument("username")
+@click.argument("password")
+@click.option("--role", default="readonly",
+              type=click.Choice(["admin", "readonly"], case_sensitive=False),
+              help="User role (default: readonly).")
+@click.pass_context
+def user_create(ctx, username, password, role):
+    """Create a new API user."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            result = await client.create_user(username, password, role)
+            click.echo(f"Created user: {result.get('username', username)} (role: {role})")
+    _run(_do())
+
+
+@user_group.command("rm")
+@click.argument("username")
+@click.pass_context
+def user_remove(ctx, username):
+    """Delete an API user."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            await client.delete_user(username)
+            click.echo(f"Deleted user: {username}")
+    _run(_do())
+
+
+@user_group.command("update")
+@click.argument("username")
+@click.option("--password", default=None, help="New password.")
+@click.option("--role", default=None,
+              type=click.Choice(["admin", "readonly"], case_sensitive=False),
+              help="New role.")
+@click.pass_context
+def user_update(ctx, username, password, role):
+    """Update an API user's password or role."""
+    if password is None and role is None:
+        click.echo("Specify --password and/or --role", err=True)
+        raise SystemExit(1)
+
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            result = await client.update_user(username, password=password, role=role)
+            click.echo(f"Updated user: {result.get('username', username)}")
+    _run(_do())
+
+
+# ============================================================================
+# events — Stream real-time events
+# ============================================================================
+
+@cli.command("events")
+@click.option("--channels", default="events",
+              help="Comma-separated event channels (events,chat,search,transfers,hubs,status).")
+@click.pass_context
+def stream_events(ctx, channels):
+    """Stream real-time events from the daemon via WebSocket.
+
+    \b
+    Examples:
+      eispy events
+      eispy events --channels chat,search
+      eispy --url http://10.0.0.5:8080 events --channels hubs,transfers
+    """
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            click.echo(f"Streaming events (channels: {channels}) — Ctrl-C to stop")
+            try:
+                async for event, data in client.events(channels=channels):
+                    ts = time.strftime("%H:%M:%S")
+                    click.echo(f"[{ts}] {event}: {json.dumps(data, default=str)}")
+            except KeyboardInterrupt:
+                pass
+            click.echo("\nStopped.")
+    _run(_do())
+
+
+# ============================================================================
+# shutdown — Graceful server shutdown
+# ============================================================================
+
+@cli.command("shutdown")
+@click.pass_context
+def remote_shutdown(ctx):
+    """Send a graceful shutdown request to the running daemon+API."""
+    async def _do():
+        async with _get_remote_client(ctx) as client:
+            await client.shutdown()
+            click.echo("Shutdown request sent")
+    _run(_do())
 
 
 def main():
