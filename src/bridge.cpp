@@ -743,7 +743,9 @@ bool DCBridge::openFileList(const std::string& fileListId) {
         listing->loadFile(path);
         m_fileLists[fileListId] = listing;
         return true;
-    } catch (const Exception&) {
+    } catch (const Exception& e) {
+        fprintf(stderr, "DCBridge::openFileList: %s: %s\n",
+                path.c_str(), e.getError().c_str());
         return false;
     }
 }

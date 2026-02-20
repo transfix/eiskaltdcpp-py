@@ -748,10 +748,31 @@ class AsyncDCClient:
                 )
             await asyncio.sleep(min(poll_interval, remaining))
 
-        # Open and browse
-        ok = self._sync_client.open_file_list(fl_id)
+        # The file list file is created on disk when the download begins
+        # (truncated & empty).  The directory scan above may find it before
+        # the transfer has finished writing all data.  Retry open_file_list
+        # with back-off to give the download time to complete.
+        last_err: Exception | None = None
+        for attempt in range(int(timeout)):
+            try:
+                ok = self._sync_client.open_file_list(fl_id)
+            except Exception as exc:
+                ok = False
+                last_err = exc
+            if ok:
+                break
+            await asyncio.sleep(1.0)
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                break
+        else:
+            ok = False
+
         if not ok:
-            raise RuntimeError(f"Failed to open file list {fl_id}")
+            raise RuntimeError(
+                f"Failed to open file list {fl_id}"
+                + (f": {last_err}" if last_err else "")
+            )
 
         entries = list(
             self._sync_client.browse_file_list(fl_id, "/")
