@@ -108,8 +108,8 @@ if(NOT EISKALTDCPP_FOUND)
     message(STATUS "System libeiskaltdcpp not found, building from source via FetchContent...")
 
     FetchContent_Declare(eiskaltdcpp
-        GIT_REPOSITORY https://github.com/eiskaltdcpp/eiskaltdcpp.git
-        GIT_TAG        v2.4.2
+        GIT_REPOSITORY https://github.com/transfix/eiskaltdcpp.git
+        GIT_TAG        fix/clean-shutdown
         GIT_SHALLOW    TRUE
     )
 
