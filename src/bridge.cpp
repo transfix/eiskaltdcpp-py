@@ -807,59 +807,77 @@ bool DCBridge::downloadFileFromList(const std::string& fileListId,
                                     const std::string& downloadTo) {
     if (!m_initialized.load()) return false;
 
-    std::lock_guard<std::mutex> lock(m_mutex);
+    // Extract everything we need from the listing while holding m_mutex,
+    // then release it before calling into QueueManager (which fires
+    // synchronous callbacks through BridgeListeners/SWIG directors).
+    // Holding m_mutex during those callbacks risks ABBA deadlock with
+    // the GIL when a concurrent C++ thread also fires a callback.
+    int64_t fileSize = 0;
+    TTHValue fileTTH;
+    HintedUser hintedUser;
+    std::string target;
 
-    auto it = m_fileLists.find(fileListId);
-    if (it == m_fileLists.end()) return false;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
 
-    auto* listing = it->second;
+        auto it = m_fileLists.find(fileListId);
+        if (it == m_fileLists.end()) return false;
 
-    // Split filePath into directory and filename parts (uses backslash like DC++)
-    std::string directory = Util::getFilePath(filePath, '/');
-    std::string fname = Util::getFileName(filePath, '/');
-    if (fname.empty()) return false;
+        auto* listing = it->second;
 
-    // Navigate to the directory containing the file
-    auto* dir = listing->getRoot();
-    if (!directory.empty() && directory != "/") {
-        // Convert forward slashes to navigate directory tree
-        StringTokenizer<std::string> st(directory, '/');
-        for (auto& tok : st.getTokens()) {
-            if (tok.empty()) continue;
-            bool found = false;
-            for (auto d : dir->directories) {
-                if (d->getName() == tok) {
-                    dir = d;
-                    found = true;
-                    break;
+        // Split filePath into directory and filename parts (uses forward slash)
+        std::string directory = Util::getFilePath(filePath, '/');
+        std::string fname = Util::getFileName(filePath, '/');
+        if (fname.empty()) return false;
+
+        // Navigate to the directory containing the file
+        auto* dir = listing->getRoot();
+        if (!directory.empty() && directory != "/") {
+            StringTokenizer<std::string> st(directory, '/');
+            for (auto& tok : st.getTokens()) {
+                if (tok.empty()) continue;
+                bool found = false;
+                for (auto d : dir->directories) {
+                    if (d->getName() == tok) {
+                        dir = d;
+                        found = true;
+                        break;
+                    }
                 }
+                if (!found) return false;
             }
-            if (!found) return false;
         }
-    }
 
-    // Find the file in the directory
-    DirectoryListing::File* filePtr = nullptr;
-    for (auto f : dir->files) {
-        if (f->getName() == fname) {
-            filePtr = f;
-            break;
+        // Find the file in the directory
+        DirectoryListing::File* filePtr = nullptr;
+        for (auto f : dir->files) {
+            if (f->getName() == fname) {
+                filePtr = f;
+                break;
+            }
         }
-    }
-    if (!filePtr) return false;
+        if (!filePtr) return false;
 
-    // Build download target path
-    std::string target = downloadTo.empty()
-        ? SETTING(DOWNLOAD_DIRECTORY)
-        : downloadTo;
-    if (!target.empty() && target.back() == PATH_SEPARATOR)
-        target += fname;
-    else if (!target.empty() && target.back() != PATH_SEPARATOR
-             && target.find('.') == std::string::npos)
-        target += PATH_SEPARATOR + fname;
+        // Extract the data we need for QueueManager::add()
+        fileSize = filePtr->getSize();
+        fileTTH = filePtr->getTTH();
+        hintedUser = listing->getUser();
+
+        // Build download target path
+        target = downloadTo.empty()
+            ? SETTING(DOWNLOAD_DIRECTORY)
+            : downloadTo;
+        if (!target.empty() && target.back() == PATH_SEPARATOR)
+            target += fname;
+        else if (!target.empty() && target.back() != PATH_SEPARATOR
+                 && target.find('.') == std::string::npos)
+            target += PATH_SEPARATOR + fname;
+    }
+    // m_mutex released — safe to call into dcpp (avoids ABBA deadlock
+    // between m_mutex and dcpp internal locks / GIL)
 
     try {
-        listing->download(filePtr, target, false, false);
+        QueueManager::getInstance()->add(target, fileSize, fileTTH, hintedUser, 0);
     } catch (const Exception&) {
         return false;
     }

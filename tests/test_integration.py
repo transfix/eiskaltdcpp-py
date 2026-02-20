@@ -31,6 +31,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Optional
@@ -107,7 +108,10 @@ class RemoteDCClient:
         self._pending: dict[int, asyncio.Future] = {}
         self._events: asyncio.Queue[tuple[str, list]] = asyncio.Queue()
         self._reader_task: Optional[asyncio.Task] = None
+        self._stderr_task: Optional[asyncio.Task] = None
         self._closed = False
+        self._stderr_lines: list[str] = []
+        self._last_heartbeat: float = 0.0
 
     async def start(self) -> None:
         """Launch the worker subprocess."""
@@ -123,7 +127,9 @@ class RemoteDCClient:
             stderr=asyncio.subprocess.PIPE,
             env=env,
         )
+        self._last_heartbeat = time.monotonic()
         self._reader_task = asyncio.create_task(self._read_loop())
+        self._stderr_task = asyncio.create_task(self._stderr_drain())
 
     async def _read_loop(self) -> None:
         """Read JSON lines from the worker's stdout."""
@@ -131,6 +137,21 @@ class RemoteDCClient:
         while True:
             raw = await self._proc.stdout.readline()
             if not raw:
+                # EOF — subprocess exited
+                rc = self._proc.returncode
+                logger.warning(
+                    "[%s] worker stdout EOF, returncode=%s", self.label, rc
+                )
+                # Fail any pending futures so callers don't hang
+                for mid, fut in list(self._pending.items()):
+                    if not fut.done():
+                        fut.set_exception(
+                            RuntimeError(
+                                f"[{self.label}] worker died "
+                                f"(returncode={rc})"
+                            )
+                        )
+                self._pending.clear()
                 break
             line = raw.decode().strip()
             if not line:
@@ -141,7 +162,10 @@ class RemoteDCClient:
                 logger.warning("[%s] bad JSON from worker: %s", self.label, line)
                 continue
 
-            if "event" in msg:
+            if "heartbeat" in msg:
+                self._last_heartbeat = time.monotonic()
+                continue
+            elif "event" in msg:
                 await self._events.put((msg["event"], msg.get("args", [])))
             elif "id" in msg:
                 fut = self._pending.pop(msg["id"], None)
@@ -151,10 +175,30 @@ class RemoteDCClient:
                     else:
                         fut.set_exception(RuntimeError(msg.get("error", "unknown")))
 
+    async def _stderr_drain(self) -> None:
+        """Continuously drain stderr to prevent pipe buffer from blocking the worker."""
+        assert self._proc and self._proc.stderr
+        while True:
+            raw = await self._proc.stderr.readline()
+            if not raw:
+                break
+            line = raw.decode(errors="replace").rstrip()
+            if line:
+                self._stderr_lines.append(line)
+                logger.info("[%s/stderr] %s", self.label, line)
+
     async def _send(self, cmd: str, args: dict | None = None, timeout: float = 120) -> Any:
         """Send a command and wait for the reply."""
         if self._closed or not self._proc or self._proc.stdin is None:
             raise RuntimeError(f"[{self.label}] worker not running")
+        # Check if the worker process is still alive
+        if self._proc.returncode is not None:
+            stderr_tail = "\n".join(self._stderr_lines[-20:])
+            raise RuntimeError(
+                f"[{self.label}] worker already exited with "
+                f"returncode={self._proc.returncode}\n"
+                f"stderr (last 20 lines):\n{stderr_tail}"
+            )
         self._msg_id += 1
         msg_id = self._msg_id
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
@@ -162,7 +206,16 @@ class RemoteDCClient:
         payload = json.dumps({"cmd": cmd, "args": args or {}, "id": msg_id}) + "\n"
         self._proc.stdin.write(payload.encode())
         await self._proc.stdin.drain()
-        return await asyncio.wait_for(fut, timeout=timeout)
+        try:
+            return await asyncio.wait_for(fut, timeout=timeout)
+        except asyncio.TimeoutError:
+            rc = self._proc.returncode
+            stderr_tail = "\n".join(self._stderr_lines[-30:])
+            raise RuntimeError(
+                f"[{self.label}] command '{cmd}' timed out after {timeout}s "
+                f"(worker alive={rc is None}, returncode={rc})\n"
+                f"stderr (last 30 lines):\n{stderr_tail}"
+            ) from None
 
     # -- Public API --------------------------------------------------------
 
@@ -317,22 +370,26 @@ class RemoteDCClient:
             except asyncio.TimeoutError:
                 self._proc.kill()
                 await self._proc.wait()
-        if self._reader_task:
-            self._reader_task.cancel()
-            try:
-                await self._reader_task
-            except (asyncio.CancelledError, Exception):
-                pass
+        for task in (self._reader_task, self._stderr_task):
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
 
     async def get_stderr(self) -> str:
-        """Read stderr from the worker (for debugging)."""
-        if self._proc and self._proc.stderr:
-            try:
-                data = await asyncio.wait_for(self._proc.stderr.read(), timeout=1)
-                return data.decode(errors="replace")
-            except asyncio.TimeoutError:
-                return ""
-        return ""
+        """Return buffered stderr from the worker (for diagnostics)."""
+        return "\n".join(self._stderr_lines)
+
+    @property
+    def worker_alive(self) -> bool:
+        """Check if the worker process is still running."""
+        return (
+            self._proc is not None
+            and self._proc.returncode is None
+            and not self._closed
+        )
 
 
 # =========================================================================
@@ -948,6 +1005,14 @@ class TestMultiClientFileTransfer:
                 if dl_path.exists() and dl_path.stat().st_size == text_entry["size"]:
                     downloaded = True
                     break
+                # If the worker died, stop waiting
+                if not bob.worker_alive:
+                    stderr_tail = await bob.get_stderr()
+                    rc = bob._proc.returncode if bob._proc else "?"
+                    assert False, (
+                        f"Worker died during download (returncode={rc}).\n"
+                        f"stderr:\n{stderr_tail}"
+                    )
                 await asyncio.sleep(2)
 
             if not downloaded:
@@ -967,7 +1032,11 @@ class TestMultiClientFileTransfer:
                 f"expected {hashes['test_document.txt']}, got {actual_hash}"
             )
         finally:
-            await bob.close_file_list(fl_id)
+            if bob.worker_alive:
+                try:
+                    await bob.close_file_list(fl_id)
+                except Exception:
+                    pass
 
     @pytest.mark.asyncio(loop_scope="module")
     async def test_bob_downloads_binary_file_from_alice(self, alice_bob_with_shares):
@@ -999,6 +1068,13 @@ class TestMultiClientFileTransfer:
                 if dl_path.exists() and dl_path.stat().st_size == bin_entry["size"]:
                     downloaded = True
                     break
+                if not bob.worker_alive:
+                    stderr_tail = await bob.get_stderr()
+                    rc = bob._proc.returncode if bob._proc else "?"
+                    assert False, (
+                        f"Worker died during download (returncode={rc}).\n"
+                        f"stderr:\n{stderr_tail}"
+                    )
                 await asyncio.sleep(2)
 
             if not downloaded:
@@ -1017,7 +1093,11 @@ class TestMultiClientFileTransfer:
                 f"expected {hashes['test_binary.dat']}, got {actual_hash}"
             )
         finally:
-            await bob.close_file_list(fl_id)
+            if bob.worker_alive:
+                try:
+                    await bob.close_file_list(fl_id)
+                except Exception:
+                    pass
 
     @pytest.mark.asyncio(loop_scope="module")
     async def test_alice_downloads_file_from_bob(self, alice_bob_with_shares):
@@ -1049,6 +1129,13 @@ class TestMultiClientFileTransfer:
                 if dl_path.exists() and dl_path.stat().st_size == bob_entry["size"]:
                     downloaded = True
                     break
+                if not alice.worker_alive:
+                    stderr_tail = await alice.get_stderr()
+                    rc = alice._proc.returncode if alice._proc else "?"
+                    assert False, (
+                        f"Worker died during download (returncode={rc}).\n"
+                        f"stderr:\n{stderr_tail}"
+                    )
                 await asyncio.sleep(2)
 
             if not downloaded:
@@ -1067,4 +1154,8 @@ class TestMultiClientFileTransfer:
                 f"expected {hashes['bob_payload.bin']}, got {actual_hash}"
             )
         finally:
-            await alice.close_file_list(fl_id)
+            if alice.worker_alive:
+                try:
+                    await alice.close_file_list(fl_id)
+                except Exception:
+                    pass

@@ -390,15 +390,34 @@ class DCWorker:
         t = threading.Thread(target=_stdin_reader, daemon=True)
         t.start()
 
-        while self._running:
-            line = await reader.get()
-            if line is None:
-                break
+        # Heartbeat: periodically emit a heartbeat so the parent can
+        # detect process death without waiting for a command timeout.
+        async def _heartbeat():
+            while self._running:
+                await asyncio.sleep(5)
+                try:
+                    self._write({"heartbeat": True})
+                except Exception:
+                    break
+
+        heartbeat_task = asyncio.create_task(_heartbeat())
+
+        try:
+            while self._running:
+                line = await reader.get()
+                if line is None:
+                    break
+                try:
+                    msg = json.loads(line)
+                    await self.handle(msg)
+                except json.JSONDecodeError as e:
+                    self._write({"id": 0, "ok": False, "error": f"Bad JSON: {e}"})
+        finally:
+            heartbeat_task.cancel()
             try:
-                msg = json.loads(line)
-                await self.handle(msg)
-            except json.JSONDecodeError as e:
-                self._write({"id": 0, "ok": False, "error": f"Bad JSON: {e}"})
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
 
         # Clean up
         if self.client:
@@ -409,6 +428,10 @@ class DCWorker:
 
 
 def main():
+    # Enable faulthandler so SIGSEGV/SIGABRT print a Python traceback
+    import faulthandler
+    faulthandler.enable(file=sys.stderr)
+
     logging.basicConfig(
         level=logging.WARNING,
         stream=sys.stderr,  # keep stdout for JSON protocol
