@@ -231,6 +231,62 @@ eispy --url http://10.0.0.5:8080 --user admin --pass s3cret hub ls
 | `--url` | `EISPY_URL` | `http://127.0.0.1:8080` | API base URL |
 | `--user` | `EISPY_USER` | `admin` | API username |
 | `--pass` | `EISPY_PASS` | `changeme` | API password |
+| `--local` | `EISPY_LOCAL` | off | Use a local DC client instead of REST API |
+| `--config-dir` | `EISKALTDCPP_CONFIG_DIR` | `~/.eiskaltdcpp-py/` | Config directory for local mode |
+
+### Default config directory
+
+The DC client stores its configuration, settings, certificates, hash
+databases, and downloaded file lists in a **config directory**.  The
+default location is:
+
+```
+~/.eiskaltdcpp-py/
+```
+
+If the `$HOME` environment variable is not set, the fallback is
+`/tmp/.eiskaltdcpp-py/`.  You can override it with
+`--config-dir <path>` or the `EISKALTDCPP_CONFIG_DIR` environment
+variable.
+
+The config directory contains:
+
+| File / Directory | Purpose |
+|------------------|---------|
+| `DCPlusPlus.xml` | All DC++ settings (nick, ports, connection mode, etc.) |
+| `Favorites.xml` | Saved hub bookmarks |
+| `Queue.xml` | Persistent download queue |
+| `HashData/` | Tiger Tree Hash database (speeds up re-hashing) |
+| `FileLists/` | Downloaded user file lists |
+| `scripts/` | Lua scripts directory (see Lua scripting below) |
+| `Certificates/` | TLS certificates for secure hubs |
+
+### Local mode
+
+By default, remote operation commands (`hub`, `chat`, `search`, etc.)
+communicate with a running daemon via the REST API.  With `--local`,
+they instead spin up a **direct DC client instance** using the native
+C++ library — no daemon or API server required:
+
+```bash
+# Use a local client with default config dir (~/.eiskaltdcpp-py/)
+eispy --local hub ls
+eispy --local share ls
+eispy --local setting get Nick
+
+# Use a specific config directory
+eispy --local --config-dir /var/lib/dc hub ls
+
+# Environment variables work too
+export EISPY_LOCAL=1
+export EISKALTDCPP_CONFIG_DIR=/var/lib/dc
+eispy hub ls
+```
+
+> **Note:** Local mode requires the SWIG bindings to be installed
+> (i.e. the `dc_core` module must be available).  Some commands like
+> `user` (API user management) and `events` (WebSocket streaming) are
+> not available in local mode since they depend on the REST API.
 
 ### Server commands
 
@@ -380,6 +436,20 @@ Events stream until Ctrl-C.
 ```bash
 eispy shutdown                                    # gracefully stop daemon+API
 ```
+
+#### Lua scripting (`eispy lua`)
+
+```bash
+eispy lua status                                  # check Lua availability
+eispy lua ls                                      # list scripts in scripts dir
+eispy lua eval 'print("hello from lua")'          # evaluate Lua code
+eispy lua eval-file /path/to/script.lua           # run a Lua file
+```
+
+Lua scripting requires the DC client to be compiled with `LUA_SCRIPT=ON`
+(the default for eiskaltdcpp).  Scripts in the config directory's
+`scripts/` folder can be run directly.  See **Lua scripting** below for
+details.
 
 ### Daemon environment variables
 
@@ -531,6 +601,10 @@ app = create_app(
 | GET | `/api/status/transfers` | any | Transfer statistics |
 | GET | `/api/status/hashing` | any | Hashing status |
 | POST | `/api/status/hashing/pause` | admin | Pause/resume hashing |
+| GET | `/api/lua/status` | any | Check Lua availability |
+| GET | `/api/lua/scripts` | any | List Lua scripts |
+| POST | `/api/lua/eval` | admin | Evaluate Lua code |
+| POST | `/api/lua/eval-file` | admin | Run a Lua script file |
 | WS | `/ws/events` | token | Real-time event stream |
 | GET | `/dashboard` | — | Web dashboard (SPA) |
 | GET | `/api/docs` | — | Interactive Swagger UI |
@@ -739,6 +813,95 @@ eispy transfer resume-hash
 eispy share size
 ```
 
+## Lua scripting
+
+eiskaltdcpp supports embedded Lua scripting when compiled with
+`LUA_SCRIPT=ON` (the default).  Lua scripts can interact with the DC
+client — sending hub messages, reading settings, and hooking into
+events.
+
+### Checking availability
+
+```bash
+eispy lua status
+# Lua scripting: available
+# Scripts path:  /home/user/.eiskaltdcpp-py/scripts/
+```
+
+Or via the REST API:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/lua/status
+```
+
+Or in Python:
+
+```python
+client.lua_is_available()     # True / False
+client.lua_get_scripts_path() # "/home/user/.eiskaltdcpp-py/scripts/"
+```
+
+### Running Lua code
+
+```bash
+# Evaluate inline code
+eispy lua eval 'print("hello from lua")'
+
+# Run a script file
+eispy lua eval-file ~/.eiskaltdcpp-py/scripts/myscript.lua
+```
+
+Via the API:
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"code": "print(\"hello\")"}' \
+  http://localhost:8080/api/lua/eval
+```
+
+Via Python:
+
+```python
+error = client.lua_eval('print("hello from lua")')
+if error:
+    print(f"Lua error: {error}")
+
+error = client.lua_eval_file("/path/to/script.lua")
+```
+
+### Scripts directory
+
+Lua scripts are stored in `<config_dir>/scripts/`.  List them with:
+
+```bash
+eispy lua ls
+```
+
+eiskaltdcpp ships with 19 example scripts in `eiskaltdcpp/data/luascripts/`
+(antispam, chat formatting, auto-away, etc.).  Copy them to your
+scripts directory to use them:
+
+```bash
+cp eiskaltdcpp/data/luascripts/*.lua ~/.eiskaltdcpp-py/scripts/
+eispy lua ls
+```
+
+### Lua API available to scripts
+
+When the full ScriptManager is initialized, Lua scripts have access to
+the `DC` table with these functions:
+
+| Function | Description |
+|----------|-------------|
+| `DC:SendHubMessage(hub, msg)` | Send a public chat message |
+| `DC:SendClientMessage(hub, nick, msg)` | Send a private message |
+| `DC:PrintDebug(msg)` | Print to debug log |
+| `DC:GetSetting(name)` | Read a DC setting |
+| `DC:GetAppPath()` | Application install path |
+| `DC:GetConfigPath()` | Config directory path |
+| `DC:GetScriptsPath()` | Scripts directory path |
+
 ## Hashing and timing notes
 
 These are practical lessons learned from integration testing (against
@@ -882,6 +1045,7 @@ eiskaltdcpp-py/
 │               ├── queue.py    # /api/queue/*
 │               ├── shares.py   # /api/shares/*
 │               ├── settings.py # /api/settings/*
+│               ├── lua.py      # /api/lua/*
 │               └── status.py   # /api/status/*
 └── tests/
     ├── CMakeLists.txt          # Test configuration

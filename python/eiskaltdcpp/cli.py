@@ -449,8 +449,19 @@ def _api_options(fn):
     "--pass", "api_pass", default="", envvar="EISPY_PASS",
     help="API password. Env: EISPY_PASS",
 )
+@click.option(
+    "--local", "local_mode", is_flag=True, default=False,
+    envvar="EISPY_LOCAL",
+    help="Use a local DC client instance instead of the REST API. Env: EISPY_LOCAL",
+)
+@click.option(
+    "--config-dir", "cli_config_dir", default="",
+    envvar="EISKALTDCPP_CONFIG_DIR",
+    help="DC config directory for local mode (default: ~/.eiskaltdcpp-py/). "
+         "Env: EISKALTDCPP_CONFIG_DIR",
+)
 @click.pass_context
-def cli(ctx, url, api_user, api_pass):
+def cli(ctx, url, api_user, api_pass, local_mode, cli_config_dir):
     """eispy — eiskaltdcpp-py DC client daemon and REST API.
 
     \b
@@ -471,6 +482,13 @@ def cli(ctx, url, api_user, api_pass):
       eispy setting  Settings (get, set, reload, networking)
       eispy transfer Transfer and hashing status
       eispy filelist Browse user file lists (request, ls, browse, download)
+      eispy lua      Lua scripting (eval, eval-file, ls, status)
+
+    \b
+    Local mode (direct DC client, no REST API required):
+      eispy --local hub ls
+      eispy --local --config-dir /var/lib/dc share ls
+      Default config directory: ~/.eiskaltdcpp-py/
 
     \b
     Remote connection options (for remote operations):
@@ -484,14 +502,20 @@ def cli(ctx, url, api_user, api_pass):
       eispy up --hub dchub://hub:411 --admin-pass s3cret
       eispy hub ls
       eispy --url http://10.0.0.5:8080 --user admin --pass s3cret hub ls
+      eispy --local hub ls
+      eispy --local --config-dir /tmp/dc setting get Nick
       eispy search query "ubuntu iso" --hub dchub://hub:411
       eispy queue ls
       eispy share add /data/movies Movies
+      eispy lua eval 'print("hello from lua")'
+      eispy lua ls
     """
     ctx.ensure_object(dict)
     ctx.obj["api_url"] = url or DEFAULT_API_URL
     ctx.obj["api_user"] = api_user
     ctx.obj["api_pass"] = api_pass
+    ctx.obj["local_mode"] = local_mode
+    ctx.obj["config_dir"] = cli_config_dir
 
 
 @cli.command()
@@ -655,6 +679,169 @@ def status(pid_file, api_url):
 # Remote-operation helpers
 # ============================================================================
 
+class _LocalClientAdapter:
+    """Wraps AsyncDCClient to provide the same async method names as RemoteDCClient.
+
+    This allows CLI commands to work identically with either a remote
+    (REST API) client or a direct local DC client instance.
+    """
+
+    def __init__(self, config_dir: str = ""):
+        self._config_dir = config_dir
+        self._client = None
+
+    async def __aenter__(self):
+        from eiskaltdcpp import AsyncDCClient
+        self._client = AsyncDCClient(self._config_dir)
+        await self._client.initialize()
+        return self
+
+    async def __aexit__(self, *exc):
+        if self._client:
+            await self._client.shutdown()
+            self._client = None
+
+    # ---- Hub ----
+    async def connect(self, url, encoding=""):
+        await self._client.connect(url, encoding)
+
+    async def disconnect(self, url):
+        await self._client.disconnect(url)
+
+    async def list_hubs_async(self):
+        return self._client.list_hubs()
+
+    async def is_connected_async(self, url):
+        return self._client.is_connected(url)
+
+    async def get_users_async(self, hub_url):
+        return self._client.get_users(hub_url)
+
+    # ---- Chat ----
+    async def send_message_async(self, hub_url, message):
+        self._client.send_message(hub_url, message)
+
+    async def send_pm_async(self, hub_url, nick, message):
+        self._client.send_pm(hub_url, nick, message)
+
+    async def get_chat_history_async(self, hub_url, max_lines=50):
+        return self._client.get_chat_history(hub_url, max_lines)
+
+    # ---- Search ----
+    async def search_async(self, terms, file_type=0, size_mode=0,
+                           size=0, hub_url=""):
+        return self._client.search(terms, file_type, size_mode, size, hub_url)
+
+    async def get_search_results_async(self, hub_url=""):
+        return self._client.get_search_results(hub_url)
+
+    async def clear_search_results_async(self, hub_url=""):
+        self._client.clear_search_results(hub_url)
+
+    # ---- Queue ----
+    async def list_queue_async(self):
+        return self._client.list_queue()
+
+    async def download_async(self, directory, name, size, tth,
+                             hub_url="", nick=""):
+        return self._client.download(directory, name, size, tth)
+
+    async def download_magnet_async(self, magnet, download_dir=""):
+        return self._client.download_magnet(magnet, download_dir)
+
+    async def remove_download_async(self, target):
+        self._client.remove_download(target)
+
+    async def clear_queue_async(self):
+        self._client.clear_queue()
+
+    async def set_priority_async(self, target, level):
+        self._client.set_priority(target, level)
+
+    # ---- Shares ----
+    async def list_shares_async(self):
+        return self._client.list_shares()
+
+    async def add_share_async(self, real_path, virtual_name):
+        return self._client.add_share(real_path, virtual_name)
+
+    async def remove_share_async(self, real_path):
+        return self._client.remove_share(real_path)
+
+    async def refresh_share_async(self):
+        self._client.refresh_share()
+
+    async def get_share_size(self):
+        return self._client.share_size
+
+    async def get_shared_files(self):
+        return self._client.shared_files
+
+    # ---- Settings ----
+    async def get_setting_async(self, name):
+        return self._client.get_setting(name)
+
+    async def set_setting_async(self, name, value):
+        self._client.set_setting(name, value)
+
+    async def reload_config_async(self):
+        self._client.reload_config()
+
+    async def start_networking_async(self):
+        self._client.start_networking()
+
+    # ---- Transfers & Hashing ----
+    async def get_transfer_stats(self):
+        return self._client.transfer_stats
+
+    async def get_hash_status(self):
+        return self._client.hash_status
+
+    async def pause_hashing_async(self, pause=True):
+        self._client.pause_hashing(pause)
+
+    # ---- Lua scripting ----
+    async def lua_is_available_async(self):
+        return self._client.lua_is_available()
+
+    async def lua_eval_async(self, code):
+        return self._client.lua_eval(code)
+
+    async def lua_eval_file_async(self, path):
+        return self._client.lua_eval_file(path)
+
+    async def lua_get_scripts_path_async(self):
+        return self._client.lua_get_scripts_path()
+
+    async def lua_list_scripts_async(self):
+        return self._client.lua_list_scripts()
+
+    # ---- Status / lifecycle ----
+    async def shutdown(self):
+        await self._client.shutdown()
+
+    # ---- User management (not available in local mode) ----
+    async def list_users(self):
+        click.echo("User management is only available via the REST API", err=True)
+        return []
+
+    async def create_user(self, *a, **kw):
+        raise click.ClickException("User management is only available via the REST API")
+
+    async def delete_user(self, *a, **kw):
+        raise click.ClickException("User management is only available via the REST API")
+
+    async def update_user(self, *a, **kw):
+        raise click.ClickException("User management is only available via the REST API")
+
+    # ---- Events (not available in local mode without long-running process) ----
+    def events(self, channels="events"):
+        raise click.ClickException(
+            "Event streaming in local mode is not supported. "
+            "Use 'eispy up' to start a daemon, then 'eispy events'."
+        )
+
+
 def _get_remote_client(ctx: click.Context):
     """Create a RemoteDCClient from CLI context (lazy import)."""
     from eiskaltdcpp.api.client import RemoteDCClient
@@ -663,6 +850,20 @@ def _get_remote_client(ctx: click.Context):
     user = ctx.obj["api_user"]
     password = ctx.obj["api_pass"]
     return RemoteDCClient(url, username=user, password=password)
+
+
+def _get_client(ctx: click.Context):
+    """Get the appropriate client based on --local flag.
+
+    Returns an async context manager that provides a client object
+    with consistent async method names (matching RemoteDCClient).
+    In local mode, uses _LocalClientAdapter wrapping AsyncDCClient.
+    In remote mode, uses RemoteDCClient.
+    """
+    if ctx.obj.get("local_mode"):
+        config_dir = ctx.obj.get("config_dir", "")
+        return _LocalClientAdapter(config_dir)
+    return _get_remote_client(ctx)
 
 
 def _run(coro):
@@ -735,7 +936,7 @@ def hub():
 def hub_connect(ctx, url, encoding):
     """Connect to a DC hub."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             await client.connect(url, encoding)
             click.echo(f"Connected to {url}")
     _run(_do())
@@ -747,7 +948,7 @@ def hub_connect(ctx, url, encoding):
 def hub_disconnect(ctx, url):
     """Disconnect from a DC hub."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             await client.disconnect(url)
             click.echo(f"Disconnected from {url}")
     _run(_do())
@@ -758,7 +959,7 @@ def hub_disconnect(ctx, url):
 def hub_list(ctx):
     """List connected hubs."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             hubs = await client.list_hubs_async()
             if not hubs:
                 click.echo("No hubs connected")
@@ -774,7 +975,7 @@ def hub_list(ctx):
 def hub_users(ctx, hub_url):
     """List users on a hub."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             users = await client.get_users_async(hub_url)
             if not users:
                 click.echo("No users found")
@@ -812,7 +1013,7 @@ def chat():
 def chat_send(ctx, hub_url, message):
     """Send a public chat message to a hub."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             await client.send_message_async(hub_url, message)
             click.echo("Message sent")
     _run(_do())
@@ -826,7 +1027,7 @@ def chat_send(ctx, hub_url, message):
 def chat_pm(ctx, hub_url, nick, message):
     """Send a private message to a user."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             await client.send_pm_async(hub_url, nick, message)
             click.echo(f"PM sent to {nick}")
     _run(_do())
@@ -839,7 +1040,7 @@ def chat_pm(ctx, hub_url, nick, message):
 def chat_history(ctx, hub_url, lines):
     """Show chat history for a hub."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             history = await client.get_chat_history_async(hub_url, max_lines=lines)
             for line in history:
                 click.echo(line)
@@ -877,7 +1078,7 @@ def search():
 def search_query(ctx, terms, file_type, size_mode, size, hub_url):
     """Search for files on connected hubs."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             ok = await client.search_async(
                 terms, file_type=file_type, size_mode=size_mode,
                 size=size, hub_url=hub_url,
@@ -898,7 +1099,7 @@ def search_query(ctx, terms, file_type, size_mode, size, hub_url):
 def search_results(ctx, hub_url, as_json):
     """Show search results."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             results = await client.get_search_results_async(hub_url)
             if as_json:
                 _print_json([_obj_to_dict(r) for r in results])
@@ -919,7 +1120,7 @@ def search_results(ctx, hub_url, as_json):
 def search_clear(ctx, hub_url):
     """Clear search results."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             await client.clear_search_results_async(hub_url)
             click.echo("Search results cleared")
     _run(_do())
@@ -951,7 +1152,7 @@ def queue():
 def queue_list(ctx, as_json):
     """List items in the download queue."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             items = await client.list_queue_async()
             if as_json:
                 _print_json([_obj_to_dict(i) for i in items])
@@ -977,7 +1178,7 @@ def queue_list(ctx, as_json):
 def queue_add(ctx, directory, name, size, tth, hub_url, nick):
     """Add a file to the download queue by details."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             ok = await client.download_async(
                 directory, name, size, tth, hub_url=hub_url, nick=nick,
             )
@@ -996,7 +1197,7 @@ def queue_add(ctx, directory, name, size, tth, hub_url, nick):
 def queue_add_magnet(ctx, magnet, download_dir):
     """Add a magnet link to the download queue."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             ok = await client.download_magnet_async(magnet, download_dir)
             if ok:
                 click.echo("Magnet queued")
@@ -1012,7 +1213,7 @@ def queue_add_magnet(ctx, magnet, download_dir):
 def queue_remove(ctx, target):
     """Remove an item from the download queue."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             await client.remove_download_async(target)
             click.echo(f"Removed: {target}")
     _run(_do())
@@ -1023,7 +1224,7 @@ def queue_remove(ctx, target):
 def queue_clear(ctx):
     """Clear the entire download queue."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             await client.clear_queue_async()
             click.echo("Queue cleared")
     _run(_do())
@@ -1039,7 +1240,7 @@ def queue_priority(ctx, target, level):
     Priority levels: 0=paused, 1=lowest, 2=low, 3=normal, 4=high, 5=highest.
     """
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             await client.set_priority_async(target, level)
             click.echo(f"Priority set to {level}")
     _run(_do())
@@ -1069,7 +1270,7 @@ def share():
 def share_list(ctx, as_json):
     """List shared directories."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             shares = await client.list_shares_async()
             if as_json:
                 _print_json([_obj_to_dict(s) for s in shares])
@@ -1095,7 +1296,7 @@ def share_add(ctx, real_path, virtual_name):
     Example: eispy share add /data/movies Movies
     """
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             ok = await client.add_share_async(real_path, virtual_name)
             if ok:
                 click.echo(f"Shared: {real_path} as '{virtual_name}'")
@@ -1111,7 +1312,7 @@ def share_add(ctx, real_path, virtual_name):
 def share_remove(ctx, real_path):
     """Remove a shared directory."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             ok = await client.remove_share_async(real_path)
             if ok:
                 click.echo(f"Removed share: {real_path}")
@@ -1126,7 +1327,7 @@ def share_remove(ctx, real_path):
 def share_refresh(ctx):
     """Refresh the file hash list for all shares."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             await client.refresh_share_async()
             click.echo("Share refresh started")
     _run(_do())
@@ -1137,7 +1338,7 @@ def share_refresh(ctx):
 def share_size(ctx):
     """Show total share size and file count."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             size = await client.get_share_size()
             files = await client.get_shared_files()
             click.echo(f"Share size:  {_format_size(size)} ({size:,} bytes)")
@@ -1169,7 +1370,7 @@ def setting():
 def setting_get(ctx, name):
     """Get the value of a setting."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             value = await client.get_setting_async(name)
             click.echo(f"{name} = {value}")
     _run(_do())
@@ -1182,7 +1383,7 @@ def setting_get(ctx, name):
 def setting_set(ctx, name, value):
     """Set a setting value."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             await client.set_setting_async(name, value)
             click.echo(f"{name} = {value}")
     _run(_do())
@@ -1193,7 +1394,7 @@ def setting_set(ctx, name, value):
 def setting_reload(ctx):
     """Reload settings from config files."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             await client.reload_config_async()
             click.echo("Config reloaded")
     _run(_do())
@@ -1204,7 +1405,7 @@ def setting_reload(ctx):
 def setting_networking(ctx):
     """Rebind network listeners (active mode ports, etc.)."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             await client.start_networking_async()
             click.echo("Networking restarted")
     _run(_do())
@@ -1233,7 +1434,7 @@ def transfer():
 def transfer_stats(ctx, as_json):
     """Show current transfer statistics."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             stats = await client.get_transfer_stats()
             d = _obj_to_dict(stats)
             if as_json:
@@ -1255,7 +1456,7 @@ def transfer_stats(ctx, as_json):
 def transfer_hash_status(ctx, as_json):
     """Show hashing progress."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             hs = await client.get_hash_status()
             d = _obj_to_dict(hs)
             if as_json:
@@ -1274,7 +1475,7 @@ def transfer_hash_status(ctx, as_json):
 def transfer_pause_hash(ctx):
     """Pause hashing."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             await client.pause_hashing_async(pause=True)
             click.echo("Hashing paused")
     _run(_do())
@@ -1285,7 +1486,7 @@ def transfer_pause_hash(ctx):
 def transfer_resume_hash(ctx):
     """Resume hashing."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             await client.pause_hashing_async(pause=False)
             click.echo("Hashing resumed")
     _run(_do())
@@ -1462,6 +1663,104 @@ def filelist_close(ctx, list_id):
 
 
 # ============================================================================
+# lua — Lua scripting
+# ============================================================================
+
+@cli.group()
+def lua():
+    """Lua scripting commands.
+
+    Evaluate Lua code, run script files, and manage the scripts directory.
+    When the DC client is compiled with LUA_SCRIPT support, Lua scripts
+    can interact with hubs, chat, settings, and more via the DC Lua API.
+
+    \b
+    Examples:
+      eispy lua status
+      eispy lua ls
+      eispy lua eval 'print("hello from lua")'
+      eispy lua eval-file /path/to/script.lua
+    """
+
+
+@lua.command("status")
+@click.pass_context
+def lua_status(ctx):
+    """Check if Lua scripting is available."""
+    async def _do():
+        async with _get_client(ctx) as client:
+            available = await client.lua_is_available_async()
+            if available:
+                path = await client.lua_get_scripts_path_async()
+                click.echo(f"Lua scripting: available")
+                click.echo(f"Scripts path:  {path}")
+            else:
+                click.echo("Lua scripting: not available")
+                click.echo("(library not compiled with LUA_SCRIPT)")
+    _run(_do())
+
+
+@lua.command("ls")
+@click.pass_context
+def lua_list_scripts(ctx):
+    """List Lua script files in the scripts directory."""
+    async def _do():
+        async with _get_client(ctx) as client:
+            scripts = await client.lua_list_scripts_async()
+            if not scripts:
+                path = await client.lua_get_scripts_path_async()
+                click.echo(f"No scripts found in {path}")
+                return
+            for s in scripts:
+                click.echo(f"  {s}")
+    _run(_do())
+
+
+@lua.command("eval")
+@click.argument("code")
+@click.pass_context
+def lua_eval(ctx, code):
+    """Evaluate a Lua code chunk.
+
+    \b
+    Examples:
+      eispy lua eval 'print("hello")'
+      eispy lua eval 'return 1+2'
+    """
+    async def _do():
+        async with _get_client(ctx) as client:
+            error = await client.lua_eval_async(code)
+            if error:
+                click.echo(f"Lua error: {error}", err=True)
+                raise SystemExit(1)
+            else:
+                click.echo("OK")
+    _run(_do())
+
+
+@lua.command("eval-file")
+@click.argument("path", type=click.Path())
+@click.pass_context
+def lua_eval_file(ctx, path):
+    """Evaluate a Lua script file.
+
+    \b
+    Examples:
+      eispy lua eval-file myscript.lua
+      eispy lua eval-file /path/to/script.lua
+    """
+    async def _do():
+        async with _get_client(ctx) as client:
+            error = await client.lua_eval_file_async(path)
+            if error:
+                click.echo(f"Lua error: {error}", err=True)
+                raise SystemExit(1)
+            else:
+                click.echo(f"OK — executed {path}")
+    _run(_do())
+
+
+# ============================================================================
 # user — API user management
 # ============================================================================
 
@@ -1482,7 +1781,7 @@ def user_group():
 def user_list(ctx):
     """List API user accounts."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             users = await client.list_users()
             if not users:
                 click.echo("No users")
@@ -1501,7 +1800,7 @@ def user_list(ctx):
 def user_create(ctx, username, password, role):
     """Create a new API user."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             result = await client.create_user(username, password, role)
             click.echo(f"Created user: {result.get('username', username)} (role: {role})")
     _run(_do())
@@ -1513,7 +1812,7 @@ def user_create(ctx, username, password, role):
 def user_remove(ctx, username):
     """Delete an API user."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             await client.delete_user(username)
             click.echo(f"Deleted user: {username}")
     _run(_do())
@@ -1533,7 +1832,7 @@ def user_update(ctx, username, password, role):
         raise SystemExit(1)
 
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             result = await client.update_user(username, password=password, role=role)
             click.echo(f"Updated user: {result.get('username', username)}")
     _run(_do())
@@ -1557,7 +1856,7 @@ def stream_events(ctx, channels):
       eispy --url http://10.0.0.5:8080 events --channels hubs,transfers
     """
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             click.echo(f"Streaming events (channels: {channels}) — Ctrl-C to stop")
             try:
                 async for event, data in client.events(channels=channels):
@@ -1578,7 +1877,7 @@ def stream_events(ctx, channels):
 def remote_shutdown(ctx):
     """Send a graceful shutdown request to the running daemon+API."""
     async def _do():
-        async with _get_remote_client(ctx) as client:
+        async with _get_client(ctx) as client:
             await client.shutdown()
             click.echo("Shutdown request sent")
     _run(_do())

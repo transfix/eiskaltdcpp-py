@@ -877,6 +877,30 @@ class AsyncDCClient:
         self._sync_client.pause_hashing(pause)
 
     # ------------------------------------------------------------------
+    # Lua scripting
+    # ------------------------------------------------------------------
+
+    def lua_is_available(self) -> bool:
+        """Check if Lua scripting support is available."""
+        return self._sync_client.lua_is_available()
+
+    def lua_eval(self, code: str) -> str:
+        """Evaluate a Lua code chunk. Returns '' on success, error on failure."""
+        return self._sync_client.lua_eval(code)
+
+    def lua_eval_file(self, path: str) -> str:
+        """Evaluate a Lua script file. Returns '' on success, error on failure."""
+        return self._sync_client.lua_eval_file(path)
+
+    def lua_get_scripts_path(self) -> str:
+        """Get the Lua scripts directory path."""
+        return self._sync_client.lua_get_scripts_path()
+
+    def lua_list_scripts(self) -> list[str]:
+        """List Lua script files in the scripts directory."""
+        return self._sync_client.lua_list_scripts()
+
+    # ------------------------------------------------------------------
     # Event stream (async iterator)
     # ------------------------------------------------------------------
 

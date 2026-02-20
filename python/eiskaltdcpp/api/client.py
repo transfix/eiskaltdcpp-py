@@ -650,6 +650,48 @@ class RemoteDCClient:
         """Pause or resume file hashing."""
         await self._post("/api/status/hashing/pause", pause=pause)
 
+    # ---- Lua scripting ----
+
+    def lua_is_available(self) -> bool:
+        raise TypeError("Use await lua_is_available_async()")
+
+    async def lua_is_available_async(self) -> bool:
+        """Check if Lua scripting is available."""
+        data = await self._get("/api/lua/status")
+        return data.get("available", False)
+
+    def lua_eval(self, code: str) -> str:
+        raise TypeError("Use await lua_eval_async()")
+
+    async def lua_eval_async(self, code: str) -> str:
+        """Evaluate a Lua code chunk. Returns '' on success, error on failure."""
+        data = await self._post("/api/lua/eval", {"code": code})
+        return data.get("error", "")
+
+    def lua_eval_file(self, path: str) -> str:
+        raise TypeError("Use await lua_eval_file_async()")
+
+    async def lua_eval_file_async(self, path: str) -> str:
+        """Evaluate a Lua file. Returns '' on success, error on failure."""
+        data = await self._post("/api/lua/eval-file", {"path": path})
+        return data.get("error", "")
+
+    def lua_get_scripts_path(self) -> str:
+        raise TypeError("Use await lua_get_scripts_path_async()")
+
+    async def lua_get_scripts_path_async(self) -> str:
+        """Get the scripts directory path."""
+        data = await self._get("/api/lua/status")
+        return data.get("scripts_path", "")
+
+    def lua_list_scripts(self) -> list[str]:
+        raise TypeError("Use await lua_list_scripts_async()")
+
+    async def lua_list_scripts_async(self) -> list[str]:
+        """List Lua script files."""
+        data = await self._get("/api/lua/scripts")
+        return data.get("scripts", [])
+
     # ---- Status ----
 
     async def get_status(self) -> dict:

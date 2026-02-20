@@ -19,6 +19,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import click
 from click.testing import CliRunner
 
 from eiskaltdcpp.cli import cli
@@ -68,9 +69,9 @@ class FakeRemoteClient:
 
 
 def _patch_client(**returns):
-    """Return a patch that replaces _get_remote_client with a FakeRemoteClient."""
+    """Return a patch that replaces _get_client with a FakeRemoteClient."""
     fake = FakeRemoteClient(**returns)
-    return patch("eiskaltdcpp.cli._get_remote_client", return_value=fake)
+    return patch("eiskaltdcpp.cli._get_client", return_value=fake)
 
 
 # Simple dataclass-like objects to mimic the real data types
@@ -813,7 +814,7 @@ class TestEventsCommand:
             def events(self, channels="events"):
                 return FakeEventStream()
 
-        with patch("eiskaltdcpp.cli._get_remote_client",
+        with patch("eiskaltdcpp.cli._get_client",
                    return_value=FakeClient()):
             result = runner.invoke(cli, [*_base_args(), "events",
                                          "--channels", "chat,hubs"])
@@ -849,7 +850,7 @@ class TestGlobalOptions:
             captured.update(ctx.obj)
             return FakeRemoteClient()
 
-        with patch("eiskaltdcpp.cli._get_remote_client", side_effect=fake_get_client):
+        with patch("eiskaltdcpp.cli._get_client", side_effect=fake_get_client):
             result = runner.invoke(cli, [
                 "--url", "http://remote:9090",
                 "--user", "joe",
@@ -869,7 +870,7 @@ class TestGlobalOptions:
             captured.update(ctx.obj)
             return FakeRemoteClient()
 
-        with patch("eiskaltdcpp.cli._get_remote_client", side_effect=fake_get_client):
+        with patch("eiskaltdcpp.cli._get_client", side_effect=fake_get_client):
             runner.invoke(cli, ["hub", "ls"])
         assert captured["api_url"] == "http://localhost:8080"
 
@@ -881,7 +882,7 @@ class TestGlobalOptions:
             captured.update(ctx.obj)
             return FakeRemoteClient()
 
-        with patch("eiskaltdcpp.cli._get_remote_client", side_effect=fake_get_client):
+        with patch("eiskaltdcpp.cli._get_client", side_effect=fake_get_client):
             result = runner.invoke(cli, ["hub", "ls"], env={
                 "EISPY_URL": "http://env-host:7777",
                 "EISPY_USER": "envuser",
@@ -952,3 +953,343 @@ class TestHelperFunctions:
         from eiskaltdcpp.cli import _print_json
         # Should not raise
         _print_json({"key": "value"})
+
+
+# ============================================================================
+# Lua CLI tests
+# ============================================================================
+
+class TestLuaCLI:
+    """Tests for the `eispy lua` subcommand group."""
+
+    @pytest.fixture
+    def runner(self):
+        return CliRunner()
+
+    def test_lua_status_available(self, runner):
+        with _patch_client(
+            lua_is_available_async=True,
+            lua_get_scripts_path_async="/home/user/.eiskaltdcpp-py/scripts/",
+        ):
+            result = runner.invoke(cli, _base_args() + ["lua", "status"])
+        assert result.exit_code == 0
+        assert "available" in result.output
+        assert "scripts/" in result.output
+
+    def test_lua_status_unavailable(self, runner):
+        with _patch_client(lua_is_available_async=False):
+            result = runner.invoke(cli, _base_args() + ["lua", "status"])
+        assert result.exit_code == 0
+        assert "not available" in result.output
+
+    def test_lua_ls_with_scripts(self, runner):
+        with _patch_client(
+            lua_list_scripts_async=["antispam.lua", "autoaway.lua", "chat.lua"],
+        ):
+            result = runner.invoke(cli, _base_args() + ["lua", "ls"])
+        assert result.exit_code == 0
+        assert "antispam.lua" in result.output
+        assert "autoaway.lua" in result.output
+
+    def test_lua_ls_empty(self, runner):
+        with _patch_client(
+            lua_list_scripts_async=[],
+            lua_get_scripts_path_async="/home/user/.eiskaltdcpp-py/scripts/",
+        ):
+            result = runner.invoke(cli, _base_args() + ["lua", "ls"])
+        assert result.exit_code == 0
+        assert "No scripts" in result.output
+
+    def test_lua_eval_success(self, runner):
+        with _patch_client(lua_eval_async=""):
+            result = runner.invoke(
+                cli, _base_args() + ["lua", "eval", 'print("hello")']
+            )
+        assert result.exit_code == 0
+        assert "OK" in result.output
+
+    def test_lua_eval_error(self, runner):
+        with _patch_client(lua_eval_async="[string]:1: syntax error"):
+            result = runner.invoke(
+                cli, _base_args() + ["lua", "eval", "bad code"]
+            )
+        assert result.exit_code != 0
+        assert "Lua error" in result.output
+
+    def test_lua_eval_file_success(self, runner):
+        with _patch_client(lua_eval_file_async=""):
+            result = runner.invoke(
+                cli, _base_args() + ["lua", "eval-file", "/tmp/test.lua"]
+            )
+        assert result.exit_code == 0
+        assert "OK" in result.output
+
+    def test_lua_eval_file_error(self, runner):
+        with _patch_client(
+            lua_eval_file_async="cannot open /tmp/test.lua: No such file",
+        ):
+            result = runner.invoke(
+                cli, _base_args() + ["lua", "eval-file", "/tmp/test.lua"]
+            )
+        assert result.exit_code != 0
+        assert "Lua error" in result.output
+
+    def test_lua_eval_missing_arg(self, runner):
+        result = runner.invoke(cli, _base_args() + ["lua", "eval"])
+        assert result.exit_code != 0
+
+    def test_lua_subcommand_help(self, runner):
+        result = runner.invoke(cli, ["lua", "--help"])
+        assert result.exit_code == 0
+        assert "eval" in result.output
+        assert "ls" in result.output
+        assert "status" in result.output
+        assert "eval-file" in result.output
+
+
+# ============================================================================
+# Local mode CLI tests
+# ============================================================================
+
+class TestLocalMode:
+    """Tests for --local flag and _LocalClientAdapter."""
+
+    @pytest.fixture
+    def runner(self):
+        return CliRunner()
+
+    def test_local_flag_stored_in_context(self, runner):
+        """Verify --local stores True in context object."""
+        from eiskaltdcpp.cli import cli as cli_group
+
+        @cli_group.command("_test_local_ctx")
+        @click.pass_context
+        def _test_cmd(ctx):
+            click.echo(f"local={ctx.obj['local_mode']}")
+
+        result = runner.invoke(cli, ["--local", "_test_local_ctx"])
+        assert "local=True" in result.output
+        # Clean up the temporary command
+        cli_group.commands.pop("_test_local_ctx", None)
+
+    def test_config_dir_stored_in_context(self, runner):
+        """Verify --config-dir stores path in context object."""
+        from eiskaltdcpp.cli import cli as cli_group
+
+        @cli_group.command("_test_cfgdir_ctx")
+        @click.pass_context
+        def _test_cmd(ctx):
+            click.echo(f"cfg={ctx.obj['config_dir']}")
+
+        result = runner.invoke(
+            cli, ["--config-dir", "/tmp/mydc", "_test_cfgdir_ctx"]
+        )
+        assert "cfg=/tmp/mydc" in result.output
+        cli_group.commands.pop("_test_cfgdir_ctx", None)
+
+    def test_get_client_returns_local_adapter_in_local_mode(self):
+        """_get_client returns _LocalClientAdapter when local_mode is True."""
+        from eiskaltdcpp.cli import _get_client, _LocalClientAdapter
+
+        class FakeCtx:
+            obj = {"local_mode": True, "config_dir": "/tmp/dc"}
+
+        result = _get_client(FakeCtx())
+        assert isinstance(result, _LocalClientAdapter)
+
+    def test_get_client_returns_remote_client_in_remote_mode(self):
+        """_get_client returns RemoteDCClient when local_mode is False."""
+        from eiskaltdcpp.cli import _get_client
+
+        class FakeCtx:
+            obj = {
+                "local_mode": False,
+                "config_dir": "",
+                "api_url": "http://test:8080",
+                "api_user": "admin",
+                "api_pass": "pass",
+            }
+
+        result = _get_client(FakeCtx())
+        # Should be a RemoteDCClient (lazy import)
+        assert type(result).__name__ == "RemoteDCClient"
+
+    def test_local_adapter_user_management_blocked(self):
+        """User management methods should raise ClickException in local mode."""
+        from eiskaltdcpp.cli import _LocalClientAdapter
+
+        adapter = _LocalClientAdapter("/tmp/dc")
+
+        async def _check():
+            with pytest.raises(click.ClickException):
+                await adapter.create_user("test", "pass")
+
+        asyncio.run(_check())
+
+    def test_local_adapter_events_blocked(self):
+        """events() should raise ClickException in local mode."""
+        from eiskaltdcpp.cli import _LocalClientAdapter
+
+        adapter = _LocalClientAdapter("/tmp/dc")
+        with pytest.raises(click.ClickException):
+            adapter.events()
+
+    def test_local_hub_ls_with_mock(self, runner):
+        """Test a local-mode command using a mocked _LocalClientAdapter."""
+        fake = FakeRemoteClient(list_hubs_async=[_Hub()])
+        with patch("eiskaltdcpp.cli._get_client", return_value=fake):
+            result = runner.invoke(
+                cli, ["--local", "hub", "ls"]
+            )
+        assert result.exit_code == 0
+        assert "TestHub" in result.output
+
+    def test_local_setting_get_with_mock(self, runner):
+        """Test local-mode setting get."""
+        fake = FakeRemoteClient(get_setting_async="MyBot")
+        with patch("eiskaltdcpp.cli._get_client", return_value=fake):
+            result = runner.invoke(
+                cli, ["--local", "setting", "get", "Nick"]
+            )
+        assert result.exit_code == 0
+        assert "MyBot" in result.output
+
+    def test_local_lua_status_with_mock(self, runner):
+        """Test local-mode lua status."""
+        fake = FakeRemoteClient(
+            lua_is_available_async=True,
+            lua_get_scripts_path_async="/tmp/dc/scripts/",
+        )
+        with patch("eiskaltdcpp.cli._get_client", return_value=fake):
+            result = runner.invoke(
+                cli, ["--local", "lua", "status"]
+            )
+        assert result.exit_code == 0
+        assert "available" in result.output
+
+    def test_local_lua_eval_with_mock(self, runner):
+        """Test local-mode lua eval."""
+        fake = FakeRemoteClient(lua_eval_async="")
+        with patch("eiskaltdcpp.cli._get_client", return_value=fake):
+            result = runner.invoke(
+                cli, ["--local", "lua", "eval", "print('hi')"]
+            )
+        assert result.exit_code == 0
+        assert "OK" in result.output
+
+
+# ============================================================================
+# Lua API route tests
+# ============================================================================
+
+class TestLuaAPIRoutes:
+    """Tests for the Lua API routes (/api/lua/*)."""
+
+    @pytest.fixture
+    def mock_client(self):
+        """Create a mock DC client with Lua methods."""
+        client = MagicMock()
+        client.lua_is_available.return_value = True
+        client.lua_get_scripts_path.return_value = "/home/test/.eiskaltdcpp-py/scripts/"
+        client.lua_list_scripts.return_value = ["test.lua", "chat.lua"]
+        client.lua_eval.return_value = ""
+        client.lua_eval_file.return_value = ""
+        return client
+
+    @pytest.fixture
+    def app_with_lua(self, mock_client):
+        """Create a FastAPI test app with Lua-capable mock client."""
+        try:
+            from fastapi.testclient import TestClient
+            from eiskaltdcpp.api.app import create_app
+        except ImportError:
+            pytest.skip("FastAPI not installed")
+
+        app = create_app(
+            dc_client=mock_client,
+            admin_username="admin",
+            admin_password="testpass",
+        )
+        return TestClient(app)
+
+    def _get_token(self, client):
+        """Login and get a JWT token."""
+        resp = client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "testpass"},
+        )
+        return resp.json()["access_token"]
+
+    def test_lua_status_endpoint(self, app_with_lua, mock_client):
+        token = self._get_token(app_with_lua)
+        resp = app_with_lua.get(
+            "/api/lua/status",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["available"] is True
+        assert "scripts/" in data["scripts_path"]
+
+    def test_lua_scripts_endpoint(self, app_with_lua, mock_client):
+        token = self._get_token(app_with_lua)
+        resp = app_with_lua.get(
+            "/api/lua/scripts",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "test.lua" in data["scripts"]
+
+    def test_lua_eval_endpoint(self, app_with_lua, mock_client):
+        token = self._get_token(app_with_lua)
+        resp = app_with_lua.post(
+            "/api/lua/eval",
+            json={"code": 'print("hello")'},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["error"] == ""
+
+    def test_lua_eval_error(self, app_with_lua, mock_client):
+        mock_client.lua_eval.return_value = "syntax error near 'bad'"
+        token = self._get_token(app_with_lua)
+        resp = app_with_lua.post(
+            "/api/lua/eval",
+            json={"code": "bad code"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is False
+        assert "syntax error" in data["error"]
+
+    def test_lua_eval_file_endpoint(self, app_with_lua, mock_client):
+        token = self._get_token(app_with_lua)
+        resp = app_with_lua.post(
+            "/api/lua/eval-file",
+            json={"path": "/tmp/test.lua"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+
+    def test_lua_eval_requires_auth(self, app_with_lua):
+        resp = app_with_lua.post(
+            "/api/lua/eval",
+            json={"code": 'print("hello")'},
+        )
+        assert resp.status_code == 401
+
+    def test_lua_unavailable(self, app_with_lua, mock_client):
+        mock_client.lua_is_available.return_value = False
+        token = self._get_token(app_with_lua)
+        resp = app_with_lua.post(
+            "/api/lua/eval",
+            json={"code": 'print("hello")'},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 503

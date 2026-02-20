@@ -170,6 +170,9 @@ bool DCBridge::initialize(const std::string& configDir) {
         cfgDir += '/';
     }
 
+    // Store for later use (e.g. luaGetScriptsPath)
+    m_configDir = cfgDir;
+
     // Create directory if needed
     try {
         std::filesystem::create_directories(cfgDir);
@@ -1157,6 +1160,149 @@ void DCBridge::setSetting(const std::string& name,
 void DCBridge::reloadConfig() {
     if (!m_initialized.load()) return;
     SettingsManager::getInstance()->load();
+}
+
+// =========================================================================
+// Lua scripting
+// =========================================================================
+
+bool DCBridge::luaIsAvailable() const {
+    // Check if the Lua state pointer symbol exists in the running process
+    void** lua_state_ptr = reinterpret_cast<void**>(
+        dlsym(RTLD_DEFAULT, "_ZN4dcpp14ScriptInstance1LE"));
+    return (lua_state_ptr != nullptr && *lua_state_ptr != nullptr);
+}
+
+std::string DCBridge::luaEval(const std::string& code) {
+    if (!m_initialized.load()) return "bridge not initialized";
+
+    void** lua_state_ptr = reinterpret_cast<void**>(
+        dlsym(RTLD_DEFAULT, "_ZN4dcpp14ScriptInstance1LE"));
+    if (!lua_state_ptr || !*lua_state_ptr)
+        return "Lua not available (library not compiled with LUA_SCRIPT)";
+
+    void* L = *lua_state_ptr;
+
+    // Resolve luaL_dostring (actually a macro; resolve luaL_loadstring + lua_pcall)
+    using LoadStringFn = int (*)(void*, const char*);
+    using PCallFn = int (*)(void*, int, int, int);
+    using ToStringFn = const char* (*)(void*, int, void*);
+    using SetTopFn = void (*)(void*, int);
+
+    auto luaL_loadstring = reinterpret_cast<LoadStringFn>(
+        dlsym(RTLD_DEFAULT, "luaL_loadstring"));
+    auto lua_pcall = reinterpret_cast<PCallFn>(
+        dlsym(RTLD_DEFAULT, "lua_pcall"));
+    auto lua_tolstring = reinterpret_cast<ToStringFn>(
+        dlsym(RTLD_DEFAULT, "lua_tolstring"));
+    auto lua_settop = reinterpret_cast<SetTopFn>(
+        dlsym(RTLD_DEFAULT, "lua_settop"));
+
+    if (!luaL_loadstring || !lua_pcall)
+        return "cannot resolve Lua C API symbols";
+
+    int err = luaL_loadstring(L, code.c_str());
+    if (err != 0) {
+        std::string msg = "load error";
+        if (lua_tolstring) {
+            const char* s = lua_tolstring(L, -1, nullptr);
+            if (s) msg = s;
+        }
+        if (lua_settop) lua_settop(L, 0);
+        return msg;
+    }
+
+    err = lua_pcall(L, 0, 0, 0);
+    if (err != 0) {
+        std::string msg = "runtime error";
+        if (lua_tolstring) {
+            const char* s = lua_tolstring(L, -1, nullptr);
+            if (s) msg = s;
+        }
+        if (lua_settop) lua_settop(L, 0);
+        return msg;
+    }
+
+    return "";  // success
+}
+
+std::string DCBridge::luaEvalFile(const std::string& path) {
+    if (!m_initialized.load()) return "bridge not initialized";
+
+    void** lua_state_ptr = reinterpret_cast<void**>(
+        dlsym(RTLD_DEFAULT, "_ZN4dcpp14ScriptInstance1LE"));
+    if (!lua_state_ptr || !*lua_state_ptr)
+        return "Lua not available (library not compiled with LUA_SCRIPT)";
+
+    void* L = *lua_state_ptr;
+
+    using LoadFileFn = int (*)(void*, const char*);
+    using PCallFn = int (*)(void*, int, int, int);
+    using ToStringFn = const char* (*)(void*, int, void*);
+    using SetTopFn = void (*)(void*, int);
+
+    auto luaL_loadfile = reinterpret_cast<LoadFileFn>(
+        dlsym(RTLD_DEFAULT, "luaL_loadfile"));
+    auto lua_pcall = reinterpret_cast<PCallFn>(
+        dlsym(RTLD_DEFAULT, "lua_pcall"));
+    auto lua_tolstring = reinterpret_cast<ToStringFn>(
+        dlsym(RTLD_DEFAULT, "lua_tolstring"));
+    auto lua_settop = reinterpret_cast<SetTopFn>(
+        dlsym(RTLD_DEFAULT, "lua_settop"));
+
+    if (!luaL_loadfile || !lua_pcall)
+        return "cannot resolve Lua C API symbols";
+
+    int err = luaL_loadfile(L, path.c_str());
+    if (err != 0) {
+        std::string msg = "load error";
+        if (lua_tolstring) {
+            const char* s = lua_tolstring(L, -1, nullptr);
+            if (s) msg = s;
+        }
+        if (lua_settop) lua_settop(L, 0);
+        return msg;
+    }
+
+    err = lua_pcall(L, 0, 0, 0);
+    if (err != 0) {
+        std::string msg = "runtime error";
+        if (lua_tolstring) {
+            const char* s = lua_tolstring(L, -1, nullptr);
+            if (s) msg = s;
+        }
+        if (lua_settop) lua_settop(L, 0);
+        return msg;
+    }
+
+    return "";  // success
+}
+
+std::string DCBridge::luaGetScriptsPath() const {
+    return m_configDir + "scripts/";
+}
+
+std::vector<std::string> DCBridge::luaListScripts() const {
+    std::vector<std::string> scripts;
+    std::string scriptsDir = m_configDir + "scripts/";
+
+    try {
+        if (!std::filesystem::exists(scriptsDir))
+            return scripts;
+        for (const auto& entry : std::filesystem::directory_iterator(scriptsDir)) {
+            if (entry.is_regular_file()) {
+                auto ext = entry.path().extension().string();
+                if (ext == ".lua") {
+                    scripts.push_back(entry.path().filename().string());
+                }
+            }
+        }
+    } catch (...) {
+        // Ignore filesystem errors
+    }
+
+    std::sort(scripts.begin(), scripts.end());
+    return scripts;
 }
 
 // =========================================================================

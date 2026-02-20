@@ -289,6 +289,25 @@ public:
     void startNetworking();
 
     // =====================================================================
+    // Lua scripting
+    // =====================================================================
+
+    /// Check if the library was compiled with Lua scripting support.
+    bool luaIsAvailable() const;
+
+    /// Evaluate a Lua code chunk.  Returns "" on success, error string on failure.
+    std::string luaEval(const std::string& code);
+
+    /// Evaluate a Lua script file.  Returns "" on success, error string on failure.
+    std::string luaEvalFile(const std::string& path);
+
+    /// Get the scripts directory path (config_dir/scripts/).
+    std::string luaGetScriptsPath() const;
+
+    /// List Lua script files in the scripts directory.
+    std::vector<std::string> luaListScripts() const;
+
+    // =====================================================================
     // Version info
     // =====================================================================
 
@@ -313,6 +332,7 @@ private:
     std::atomic<bool> m_initialized{false};
     DCClientCallback* m_callback = nullptr;
     mutable std::mutex m_mutex;
+    std::string m_configDir;  // resolved config directory (with trailing slash)
 
     // Hub tracking (url → data)
     std::unordered_map<std::string, HubData> m_hubs;
