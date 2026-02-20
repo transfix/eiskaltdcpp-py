@@ -738,8 +738,25 @@ bool DCBridge::openFileList(const std::string& fileListId) {
     if (m_fileLists.count(fileListId) > 0) return true; // Already open
 
     auto path = Util::getListPath() + fileListId;
+
+    // Resolve the User from the CID embedded in the filename.
+    // File list names follow: [nick].[CID-base32].xml.bz2
+    UserPtr user = DirectoryListing::getUserFromFilename(fileListId);
+    if (!user) {
+        fprintf(stderr, "DCBridge::openFileList: could not resolve user "
+                        "from filename '%s'\n", fileListId.c_str());
+        return false;
+    }
+
+    // Get a hub URL hint for the user (needed for download connections)
+    std::string hubHint;
+    auto hubs = ClientManager::getInstance()->getHubUrls(user->getCID());
+    if (!hubs.empty()) {
+        hubHint = hubs.front();
+    }
+
     try {
-        auto* listing = new DirectoryListing(HintedUser());
+        auto* listing = new DirectoryListing(HintedUser(user, hubHint));
         listing->loadFile(path);
         m_fileLists[fileListId] = listing;
         return true;
@@ -863,6 +880,12 @@ bool DCBridge::downloadFileFromList(const std::string& fileListId,
         fileTTH = filePtr->getTTH();
         hintedUser = listing->getUser();
 
+        if (!hintedUser.user) {
+            fprintf(stderr, "DCBridge::downloadFileFromList: listing has null "
+                            "user for '%s'\n", fileListId.c_str());
+            return false;
+        }
+
         // Build download target path
         target = downloadTo.empty()
             ? SETTING(DOWNLOAD_DIRECTORY)
@@ -895,6 +918,12 @@ bool DCBridge::downloadDirFromList(const std::string& fileListId,
     if (it == m_fileLists.end()) return false;
 
     auto* listing = it->second;
+
+    if (!listing->getUser().user) {
+        fprintf(stderr, "DCBridge::downloadDirFromList: listing has null "
+                        "user for '%s'\n", fileListId.c_str());
+        return false;
+    }
 
     // Navigate to the requested directory
     DirectoryListing::Directory* dir = nullptr;
