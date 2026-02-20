@@ -365,6 +365,11 @@ private:
         // Per-hub user map: nick → UserInfo, populated by
         // ClientListener::UserUpdated / UserRemoved callbacks.
         std::unordered_map<std::string, UserInfo> users;
+        // Cached hub info — updated from socket-thread callbacks where
+        // Client* access is safe.  API-thread methods (listHubs,
+        // isHubConnected) read ONLY from this cache under m_mutex,
+        // avoiding data-race reads on Client* GETSET members.
+        HubInfo cachedInfo;
     };
 
     // State
