@@ -17,6 +17,7 @@
 
 #include <dcpp/DCPlusPlus.h>
 #include <dcpp/Util.h>
+#include <dcpp/BufferedSocket.h>
 #include <dcpp/Client.h>
 #include <dcpp/ClientManager.h>
 #include <dcpp/ConnectionManager.h>
@@ -47,8 +48,20 @@
 #include <filesystem>
 #include <iostream>
 
-#include <dlfcn.h>   // dlsym — for runtime Lua scripting init
+#include <dlfcn.h>   // dlsym — for runtime ScriptInstance::L resolution
 #include <unistd.h>  // getpid — for default nick generation
+
+// We do NOT #include <lua.hpp> here.  The installed Lua dev headers may be
+// a different version (e.g. 5.3 or 5.4) from the Lua library that
+// libeiskaltdcpp.so was actually linked against (e.g. 5.2).  Mixing headers
+// from one version with the runtime of another causes an ABI mismatch —
+// a lua_State* created by 5.3's luaL_newstate is incompatible with 5.2's
+// lua_getglobal, lua_pcall, etc. and leads to segfaults inside liblua.
+//
+// Instead, we resolve luaL_newstate / luaL_openlibs / lua_close at runtime
+// via dlsym from the SAME liblua that libeiskaltdcpp.so loaded, ensuring
+// the state we create is compatible.
+struct lua_State;  // opaque forward declaration
 
 using namespace dcpp;
 
@@ -63,43 +76,85 @@ namespace eiskaltdcpp_py {
 // lua_State* pointer.  If ScriptManager::load() was never called, that
 // pointer is null and the process segfaults.
 //
-// We cannot simply #include <dcpp/ScriptManager.h> because it depends on
-// extra/lunar.h which is not installed by the dev package.  Instead, we
-// resolve the singleton instance pointer and load() method at runtime via
-// dlsym using the Itanium ABI mangled names (stable on Linux/GCC/Clang).
+// We resolve ALL Lua symbols at runtime via dlsym from the SAME liblua
+// that libeiskaltdcpp.so loaded.  This avoids header/library ABI mismatch
+// (e.g. Lua 5.3 headers vs Lua 5.2 runtime) which corrupts lua_State.
 // =========================================================================
 
+// Lua C API function types we need, resolved at runtime via dlsym.
+using luaL_newstate_t  = lua_State* (*)();
+using luaL_openlibs_t  = void (*)(lua_State*);
+using lua_close_t      = void (*)(lua_State*);
+using luaL_loadstring_t = int (*)(lua_State*, const char*);
+// Lua 5.2+: luaL_loadfile is a macro → luaL_loadfilex(L, f, NULL)
+using luaL_loadfilex_t = int (*)(lua_State*, const char*, const char*);
+// Lua 5.2+: lua_pcall is a macro → lua_pcallk(L, n, r, f, 0, NULL)
+using lua_pcallk_t     = int (*)(lua_State*, int, int, int, int, void*);
+using lua_tolstring_t  = const char* (*)(lua_State*, int, size_t*);
+using lua_settop_t     = void (*)(lua_State*, int);
+
+// Cached function pointers (resolved once in initLuaScriptingIfPresent).
+static lua_close_t      s_lua_close = nullptr;
+static luaL_loadstring_t s_luaL_loadstring = nullptr;
+static luaL_loadfilex_t  s_luaL_loadfilex = nullptr;
+static lua_pcallk_t      s_lua_pcallk = nullptr;
+static lua_tolstring_t   s_lua_tolstring = nullptr;
+static lua_settop_t      s_lua_settop = nullptr;
+
+// Resolve the protected static dcpp::ScriptInstance::L pointer via dlsym.
+// We can't #include ScriptManager.h and access it directly because L is
+// protected.  The mangled name is stable across GCC/Clang (Itanium ABI).
+#ifdef LUA_SCRIPT
+static lua_State** resolveLuaStatePtr() {
+    void* sym = dlsym(RTLD_DEFAULT, "_ZN4dcpp14ScriptInstance1LE");
+    return reinterpret_cast<lua_State**>(sym);
+}
+#endif
+
 static void initLuaScriptingIfPresent() {
-    // dcpp::ScriptInstance::L  (static protected member — lua_State* pointer)
-    // Mangled: _ZN4dcpp14ScriptInstance1LE
-    void** lua_state_ptr = reinterpret_cast<void**>(
-        dlsym(RTLD_DEFAULT,
-              "_ZN4dcpp14ScriptInstance1LE"));
+#ifdef LUA_SCRIPT
+    lua_State** lua_state_ptr = resolveLuaStatePtr();
     if (!lua_state_ptr)
         return;   // Not compiled with Lua — nothing to do
 
     if (*lua_state_ptr)
         return;   // Already initialized
 
-    // Resolve luaL_newstate and luaL_openlibs from the loaded Lua library
-    using NewStateFn = void* (*)();
-    using OpenLibsFn = void (*)(void*);
-
-    NewStateFn new_state = reinterpret_cast<NewStateFn>(
+    // Resolve Lua C API functions from the SAME liblua that
+    // libeiskaltdcpp.so loaded (using RTLD_DEFAULT).  This ensures the
+    // lua_State we create is ABI-compatible with the Lua code inside
+    // libeiskaltdcpp.so, even if the installed Lua dev headers are a
+    // different version.
+    auto fn_newstate = reinterpret_cast<luaL_newstate_t>(
         dlsym(RTLD_DEFAULT, "luaL_newstate"));
-    OpenLibsFn open_libs = reinterpret_cast<OpenLibsFn>(
+    auto fn_openlibs = reinterpret_cast<luaL_openlibs_t>(
         dlsym(RTLD_DEFAULT, "luaL_openlibs"));
+    s_lua_close = reinterpret_cast<lua_close_t>(
+        dlsym(RTLD_DEFAULT, "lua_close"));
 
-    if (!new_state || !open_libs)
-        return;
+    if (!fn_newstate || !fn_openlibs || !s_lua_close)
+        return;   // Lua symbols not available
 
-    // Initialize a minimal Lua state so that onClientMessage() doesn't crash
-    // when it calls lua_pushlightuserdata(L, ...) with L == null.
-    void* L = new_state();
+    // Resolve the remaining Lua C API functions used by luaEval / luaEvalFile.
+    s_luaL_loadstring = reinterpret_cast<luaL_loadstring_t>(
+        dlsym(RTLD_DEFAULT, "luaL_loadstring"));
+    s_luaL_loadfilex = reinterpret_cast<luaL_loadfilex_t>(
+        dlsym(RTLD_DEFAULT, "luaL_loadfilex"));
+    s_lua_pcallk = reinterpret_cast<lua_pcallk_t>(
+        dlsym(RTLD_DEFAULT, "lua_pcallk"));
+    s_lua_tolstring = reinterpret_cast<lua_tolstring_t>(
+        dlsym(RTLD_DEFAULT, "lua_tolstring"));
+    s_lua_settop = reinterpret_cast<lua_settop_t>(
+        dlsym(RTLD_DEFAULT, "lua_settop"));
+
+    // Initialize a minimal Lua state so that onClientMessage() doesn't
+    // crash when it calls lua_pushlightuserdata(L, ...) with L == null.
+    lua_State* L = fn_newstate();
     if (!L) return;
-    open_libs(L);
+    fn_openlibs(L);
 
     *lua_state_ptr = L;
+#endif
 }
 
 // =========================================================================
@@ -169,6 +224,9 @@ bool DCBridge::initialize(const std::string& configDir) {
     if (!cfgDir.empty() && cfgDir.back() != '/') {
         cfgDir += '/';
     }
+
+    // Store for later use (e.g. luaGetScriptsPath)
+    m_configDir = cfgDir;
 
     // Create directory if needed
     try {
@@ -257,7 +315,33 @@ void DCBridge::shutdown() {
         ClientManager::getInstance()->putClient(client);
     }
 
-    // Shut down core library
+    // Drain all background I/O threads BEFORE touching any managers or
+    // the Lua state.  dcpp::shutdown() destroys ScriptManager (which
+    // accesses Lua) and TimerManager BEFORE it calls
+    // ConnectionManager::shutdown() / BufferedSocket::waitShutdown().
+    // If hub sockets are still running at that point, their threads
+    // crash dereferencing destroyed singletons.  Pre-draining here
+    // ensures every socket thread has exited first.
+    ConnectionManager::getInstance()->shutdown();
+    BufferedSocket::waitShutdown();
+
+    // Close the Lua state we created in initLuaScriptingIfPresent().
+    // All socket threads are stopped, so no concurrent access is
+    // possible.  ScriptManager::~ScriptManager() checks for null and
+    // will skip its own lua_close().
+#ifdef LUA_SCRIPT
+    {
+        lua_State** lua_state_ptr = resolveLuaStatePtr();
+        if (lua_state_ptr && *lua_state_ptr && s_lua_close) {
+            s_lua_close(*lua_state_ptr);
+            *lua_state_ptr = nullptr;
+        }
+    }
+#endif
+
+    // Shut down core library — the redundant ConnectionManager::shutdown()
+    // and BufferedSocket::waitShutdown() calls inside are harmless
+    // (idempotent / already drained).
     dcpp::shutdown();
 
     // Allow re-initialization — dcpp singletons have been destroyed so a
@@ -316,6 +400,7 @@ void DCBridge::connectHub(const std::string& url,
         std::lock_guard<std::mutex> lock(m_mutex);
         HubData hd;
         hd.client = client;
+        hd.cachedInfo.url = url;
         m_hubs[url] = std::move(hd);
     }
 }
@@ -344,29 +429,16 @@ std::vector<HubInfo> DCBridge::listHubs() {
     std::vector<HubInfo> result;
     if (!m_initialized.load()) return result;
 
-    // Snapshot the url→client pointers under the lock
-    std::vector<std::pair<std::string, Client*>> snapshot;
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        snapshot.reserve(m_hubs.size());
-        for (auto& [url, data] : m_hubs) {
-            snapshot.emplace_back(url, data.client);
-        }
-    }
-
-    // m_mutex released — safe to call dcpp accessors (avoids ABBA deadlock)
-    for (auto& [url, client] : snapshot) {
-        HubInfo info;
-        info.url = url;
-        if (client) {
-            info.name = client->getHubName();
-            info.description = client->getHubDescription();
-            info.userCount = client->getUserCount();
-            info.sharedBytes = client->getAvailable();
-            info.connected = client->isConnected();
-            info.isOp = client->isOp();
-        }
-        result.push_back(std::move(info));
+    // Read entirely from the cached HubInfo snapshots under m_mutex.
+    // The cache is populated by socket-thread callbacks (Connected,
+    // HubUpdated, UserUpdated, etc.) where Client* access is safe.
+    // This avoids data-race reads on Client* GETSET members from the
+    // API thread, and sidesteps ABBA deadlock between m_mutex and
+    // NmdcHub::cs.
+    std::lock_guard<std::mutex> lock(m_mutex);
+    result.reserve(m_hubs.size());
+    for (auto& [url, data] : m_hubs) {
+        result.push_back(data.cachedInfo);
     }
     return result;
 }
@@ -375,8 +447,8 @@ bool DCBridge::isHubConnected(const std::string& hubUrl) {
     if (!m_initialized.load()) return false;
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    auto* client = findClient(hubUrl);
-    return client && client->isConnected();
+    auto* hd = findHub(hubUrl);
+    return hd && hd->cachedInfo.connected;
 }
 
 // =========================================================================
@@ -1157,6 +1229,116 @@ void DCBridge::setSetting(const std::string& name,
 void DCBridge::reloadConfig() {
     if (!m_initialized.load()) return;
     SettingsManager::getInstance()->load();
+}
+
+// =========================================================================
+// Lua scripting
+// =========================================================================
+
+bool DCBridge::luaIsAvailable() const {
+#ifdef LUA_SCRIPT
+    lua_State** lua_state_ptr = resolveLuaStatePtr();
+    return (lua_state_ptr != nullptr && *lua_state_ptr != nullptr);
+#else
+    return false;
+#endif
+}
+
+void DCBridge::luaEval(const std::string& code) {
+    if (!m_initialized.load()) throw LuaError("bridge not initialized");
+
+#ifdef LUA_SCRIPT
+    lua_State** lua_state_ptr = resolveLuaStatePtr();
+    if (!lua_state_ptr || !*lua_state_ptr)
+        throw LuaNotAvailableError();
+    if (!s_luaL_loadstring || !s_lua_pcallk || !s_lua_tolstring || !s_lua_settop)
+        throw LuaSymbolError();
+
+    lua_State* L = *lua_state_ptr;
+
+    int err = s_luaL_loadstring(L, code.c_str());
+    if (err != 0) {
+        std::string msg = "load error";
+        const char* s = s_lua_tolstring(L, -1, nullptr);
+        if (s) msg = s;
+        s_lua_settop(L, 0);
+        throw LuaLoadError(msg);
+    }
+
+    // lua_pcall(L, 0, 0, 0) → lua_pcallk(L, 0, 0, 0, 0, NULL) in Lua 5.2+
+    err = s_lua_pcallk(L, 0, 0, 0, 0, nullptr);
+    if (err != 0) {
+        std::string msg = "runtime error";
+        const char* s = s_lua_tolstring(L, -1, nullptr);
+        if (s) msg = s;
+        s_lua_settop(L, 0);
+        throw LuaRuntimeError(msg);
+    }
+#else
+    throw LuaNotAvailableError();
+#endif
+}
+
+void DCBridge::luaEvalFile(const std::string& path) {
+    if (!m_initialized.load()) throw LuaError("bridge not initialized");
+
+#ifdef LUA_SCRIPT
+    lua_State** lua_state_ptr = resolveLuaStatePtr();
+    if (!lua_state_ptr || !*lua_state_ptr)
+        throw LuaNotAvailableError();
+    if (!s_luaL_loadfilex || !s_lua_pcallk || !s_lua_tolstring || !s_lua_settop)
+        throw LuaSymbolError();
+
+    lua_State* L = *lua_state_ptr;
+
+    // luaL_loadfile(L, f) → luaL_loadfilex(L, f, NULL) in Lua 5.2+
+    int err = s_luaL_loadfilex(L, path.c_str(), nullptr);
+    if (err != 0) {
+        std::string msg = "load error";
+        const char* s = s_lua_tolstring(L, -1, nullptr);
+        if (s) msg = s;
+        s_lua_settop(L, 0);
+        throw LuaLoadError(msg);
+    }
+
+    err = s_lua_pcallk(L, 0, 0, 0, 0, nullptr);
+    if (err != 0) {
+        std::string msg = "runtime error";
+        const char* s = s_lua_tolstring(L, -1, nullptr);
+        if (s) msg = s;
+        s_lua_settop(L, 0);
+        throw LuaRuntimeError(msg);
+    }
+#else
+    throw LuaNotAvailableError();
+#endif
+}
+
+std::string DCBridge::luaGetScriptsPath() const {
+    return m_configDir + "scripts/";
+}
+
+std::vector<std::string> DCBridge::luaListScripts() const {
+    std::vector<std::string> scripts;
+    std::string scriptsDir = m_configDir + "scripts/";
+
+    try {
+        if (!std::filesystem::exists(scriptsDir))
+            return scripts;
+        for (const auto& entry : std::filesystem::directory_iterator(scriptsDir)) {
+            if (entry.is_regular_file()) {
+                auto ext = entry.path().extension().string();
+                if (ext == ".lua") {
+                    scripts.push_back(entry.path().filename().string());
+                }
+            }
+        }
+    } catch (...) {
+        // Ignore filesystem errors
+    }
+
+    std::sort(scripts.begin(), scripts.end());
+    return scripts;
 }
 
 // =========================================================================

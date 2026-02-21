@@ -20,6 +20,7 @@
 #include <atomic>
 #include <deque>
 #include <unordered_map>
+#include <stdexcept>
 
 #include "types.h"
 
@@ -36,6 +37,42 @@ class DirectoryListing;
 }
 
 namespace eiskaltdcpp_py {
+
+// =====================================================================
+// Lua exception hierarchy
+// =====================================================================
+
+/// Base exception for all Lua scripting errors.
+class LuaError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
+/// Lua is not available (library not compiled with LUA_SCRIPT).
+class LuaNotAvailableError : public LuaError {
+public:
+    LuaNotAvailableError()
+        : LuaError("Lua not available (library not compiled with LUA_SCRIPT)") {}
+};
+
+/// Lua C API symbols could not be resolved at runtime.
+class LuaSymbolError : public LuaError {
+public:
+    LuaSymbolError()
+        : LuaError("cannot resolve Lua C API symbols") {}
+};
+
+/// A Lua chunk failed to compile (syntax error).
+class LuaLoadError : public LuaError {
+public:
+    using LuaError::LuaError;
+};
+
+/// A Lua chunk compiled but raised a runtime error.
+class LuaRuntimeError : public LuaError {
+public:
+    using LuaError::LuaError;
+};
 
 /**
  * Main bridge class — the single entry point from Python into libeiskaltdcpp.
@@ -289,6 +326,27 @@ public:
     void startNetworking();
 
     // =====================================================================
+    // Lua scripting
+    // =====================================================================
+
+    /// Check if the library was compiled with Lua scripting support.
+    bool luaIsAvailable() const;
+
+    /// Evaluate a Lua code chunk.
+    /// @throws LuaNotAvailableError, LuaSymbolError, LuaLoadError, LuaRuntimeError
+    void luaEval(const std::string& code);
+
+    /// Evaluate a Lua script file.
+    /// @throws LuaNotAvailableError, LuaSymbolError, LuaLoadError, LuaRuntimeError
+    void luaEvalFile(const std::string& path);
+
+    /// Get the scripts directory path (config_dir/scripts/).
+    std::string luaGetScriptsPath() const;
+
+    /// List Lua script files in the scripts directory.
+    std::vector<std::string> luaListScripts() const;
+
+    // =====================================================================
     // Version info
     // =====================================================================
 
@@ -307,12 +365,18 @@ private:
         // Per-hub user map: nick → UserInfo, populated by
         // ClientListener::UserUpdated / UserRemoved callbacks.
         std::unordered_map<std::string, UserInfo> users;
+        // Cached hub info — updated from socket-thread callbacks where
+        // Client* access is safe.  API-thread methods (listHubs,
+        // isHubConnected) read ONLY from this cache under m_mutex,
+        // avoiding data-race reads on Client* GETSET members.
+        HubInfo cachedInfo;
     };
 
     // State
     std::atomic<bool> m_initialized{false};
     DCClientCallback* m_callback = nullptr;
     mutable std::mutex m_mutex;
+    std::string m_configDir;  // resolved config directory (with trailing slash)
 
     // Hub tracking (url → data)
     std::unordered_map<std::string, HubData> m_hubs;

@@ -13,11 +13,28 @@ try:
 except ImportError:
     __version__ = "2.4.2"
 
+# Exception hierarchy — always importable (pure Python)
+from eiskaltdcpp.exceptions import (  # noqa: F401
+    LuaError,
+    LuaLoadError,
+    LuaNotAvailableError,
+    LuaRuntimeError,
+    LuaSymbolError,
+)
+
 # Import high-level wrapper when SWIG module is available
 try:
     from eiskaltdcpp.dc_client import DCClient
     from eiskaltdcpp.async_client import AsyncDCClient
-    __all__ = ["DCClient", "AsyncDCClient", "__version__"]
+    __all__ = [
+        "DCClient", "AsyncDCClient", "__version__",
+        "LuaError", "LuaNotAvailableError", "LuaSymbolError",
+        "LuaLoadError", "LuaRuntimeError",
+    ]
 except ImportError:
     # SWIG module not yet built — only version available
-    __all__ = ["__version__"]
+    __all__ = [
+        "__version__",
+        "LuaError", "LuaNotAvailableError", "LuaSymbolError",
+        "LuaLoadError", "LuaRuntimeError",
+    ]

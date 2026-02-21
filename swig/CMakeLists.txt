@@ -73,10 +73,31 @@ add_custom_command(TARGET dc_core POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/cli.py
         ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/cli.py
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/exceptions.py
+        ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/exceptions.py
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/api
         ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/api
     COMMENT "SWIG Python module built: dc_core"
+)
+
+# ---------------------------------------------------------------------------
+# Dev symlinks — so that "poetry install" (editable) and PYTHONPATH=python/
+# can find the SWIG artifacts without having to set PYTHONPATH=build/python/.
+# These are gitignored (*.so globally, dc_core.py explicitly).
+# ---------------------------------------------------------------------------
+add_custom_command(TARGET dc_core POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E create_symlink
+        ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/_dc_core.so
+        ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/_dc_core.so
+    COMMAND ${CMAKE_COMMAND} -E create_symlink
+        ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/dc_core.py
+        ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/dc_core.py
+    COMMAND ${CMAKE_COMMAND} -E create_symlink
+        ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/_version.py
+        ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/_version.py
+    COMMENT "Dev symlinks created in python/eiskaltdcpp/ for editable installs"
 )
 
 # Ensure _version.py is also in the build tree for tests

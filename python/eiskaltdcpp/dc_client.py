@@ -569,6 +569,44 @@ class DCClient:
         self._bridge.reloadConfig()
 
     # ------------------------------------------------------------------
+    # Lua scripting
+    # ------------------------------------------------------------------
+
+    def lua_is_available(self) -> bool:
+        """Check if Lua scripting support is available."""
+        return self._bridge.luaIsAvailable()
+
+    def lua_eval(self, code: str) -> None:
+        """Evaluate a Lua code chunk.
+
+        Raises:
+            LuaNotAvailableError: Lua not compiled in.
+            LuaSymbolError: Lua C API symbols not found.
+            LuaLoadError: Code failed to compile (syntax error).
+            LuaRuntimeError: Code raised a runtime error.
+        """
+        self._bridge.luaEval(code)
+
+    def lua_eval_file(self, path: str) -> None:
+        """Evaluate a Lua script file.
+
+        Raises:
+            LuaNotAvailableError: Lua not compiled in.
+            LuaSymbolError: Lua C API symbols not found.
+            LuaLoadError: File failed to compile (syntax error).
+            LuaRuntimeError: Script raised a runtime error.
+        """
+        self._bridge.luaEvalFile(path)
+
+    def lua_get_scripts_path(self) -> str:
+        """Get the Lua scripts directory path."""
+        return self._bridge.luaGetScriptsPath()
+
+    def lua_list_scripts(self) -> list[str]:
+        """List Lua script files in the scripts directory."""
+        return list(self._bridge.luaListScripts())
+
+    # ------------------------------------------------------------------
     # Context manager
     # ------------------------------------------------------------------
 
