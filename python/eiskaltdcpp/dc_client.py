@@ -72,6 +72,8 @@ EVENT_TYPES = frozenset({
     "upload_complete",
     # Hash events
     "hash_progress",
+    # NMDCpb protobuf events
+    "pb_message",
 })
 
 
@@ -213,6 +215,12 @@ class _CallbackRouter(dc_core.DCClientCallback):
     ) -> None:
         self._dispatch("hash_progress", currentFile, filesLeft, bytesLeft)
 
+    # NMDCpb events
+    def onNmdcPbMessage(
+        self, hubUrl: str, cmd: str, nick: str, data: str
+    ) -> None:
+        self._dispatch("pb_message", hubUrl, cmd, nick, data)
+
 
 # ============================================================================
 # DCClient — High-level Pythonic wrapper
@@ -342,6 +350,38 @@ class DCClient:
     def send_pm(self, hub_url: str, nick: str, message: str) -> None:
         """Send a private message to a user on a hub."""
         self._bridge.sendPM(hub_url, nick, message)
+
+    # ------------------------------------------------------------------
+    # NMDCpb protobuf messaging
+    # ------------------------------------------------------------------
+
+    def send_pb(self, hub_url: str, base64data: str) -> None:
+        """Send a $PB protobuf broadcast to a hub.
+
+        Args:
+            hub_url: Hub URL (must be an NMDC hub with NMDCpb support)
+            base64data: Base64url-encoded PbEnvelope payload
+        """
+        self._bridge.pbBroadcast(hub_url, base64data)
+
+    def send_pb_routed(
+        self, hub_url: str, to_nick: str, base64data: str
+    ) -> None:
+        """Send a $PBR protobuf routed message to a specific user.
+
+        Args:
+            hub_url: Hub URL
+            to_nick: Recipient nick
+            base64data: Base64url-encoded PbEnvelope payload
+        """
+        self._bridge.pbRouted(hub_url, to_nick, base64data)
+
+    def hub_supports_nmdcpb(self, hub_url: str) -> bool:
+        """Check if a hub supports the NMDCpb extension.
+
+        Returns True if the hub advertised NMDCpb in its $Supports response.
+        """
+        return self._bridge.hubSupportsNmdcPb(hub_url)
 
     def get_chat_history(
         self, hub_url: str, max_lines: int = 100

@@ -73,6 +73,9 @@ class AsyncDCClient:
         # Private message queue for await-style consumption
         self._pm_queue: asyncio.Queue[tuple[str, str, str, str]] = asyncio.Queue()
 
+        # NMDCpb protobuf message queue (hub_url, cmd, nick, data)
+        self._pb_queue: asyncio.Queue[tuple[str, str, str, str]] = asyncio.Queue()
+
         # Search result queue
         self._search_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
@@ -297,6 +300,18 @@ class AsyncDCClient:
             except RuntimeError:
                 pass
 
+        @self._sync_client.on("pb_message")
+        def _on_pb(hub_url, cmd, nick, data):
+            self._dispatch_event("pb_message", hub_url, cmd, nick, data)
+            try:
+                loop = self._ensure_loop()
+                loop.call_soon_threadsafe(
+                    self._pb_queue.put_nowait,
+                    (hub_url, cmd, nick, data),
+                )
+            except RuntimeError:
+                pass
+
         @self._sync_client.on("status_message")
         def _on_status(hub_url, message):
             self._dispatch_event("status_message", hub_url, message)
@@ -501,42 +516,62 @@ class AsyncDCClient:
         """Send a private message."""
         self._sync_client.send_pm(hub_url, nick, message)
 
-    async def wait_pm(
+    # ------------------------------------------------------------------
+    # NMDCpb protobuf messaging
+    # ------------------------------------------------------------------
+
+    def send_pb(self, hub_url: str, base64data: str) -> None:
+        """Send a $PB protobuf broadcast to a hub."""
+        self._sync_client.send_pb(hub_url, base64data)
+
+    def send_pb_routed(
+        self, hub_url: str, to_nick: str, base64data: str
+    ) -> None:
+        """Send a $PBR protobuf routed message to a specific user."""
+        self._sync_client.send_pb_routed(hub_url, to_nick, base64data)
+
+    def hub_supports_nmdcpb(self, hub_url: str) -> bool:
+        """Check if a hub supports the NMDCpb extension."""
+        return self._sync_client.hub_supports_nmdcpb(hub_url)
+
+    async def wait_pb_message(
         self,
         *,
+        cmd: Optional[str] = None,
         from_nick: Optional[str] = None,
         timeout: float = 20.0,
     ) -> tuple[str, str, str, str]:
         """
-        Wait for and return a private message.
+        Wait for and return an NMDCpb protobuf message.
 
         Args:
-            from_nick: If specified, only return PMs from this nick
-            timeout: Timeout in seconds
+            cmd: If specified, only return messages with this command
+                 (e.g. ``"$PB"``, ``"$PBB"``, ``"$PBR"``).
+            from_nick: If specified, only return messages from this nick.
+            timeout: Timeout in seconds.
 
         Returns:
-            Tuple of (hub_url, from_nick, to_nick, message)
+            Tuple of (hub_url, cmd, nick, data).
         """
         deadline = asyncio.get_event_loop().time() + timeout
         while True:
             remaining = deadline - asyncio.get_event_loop().time()
             if remaining <= 0:
                 raise asyncio.TimeoutError(
-                    f"No PM received within {timeout}s"
-                    + (f" from {from_nick}" if from_nick else "")
+                    f"No PB message received within {timeout}s"
                 )
             try:
-                pm = await asyncio.wait_for(
-                    self._pm_queue.get(), timeout=remaining
+                msg = await asyncio.wait_for(
+                    self._pb_queue.get(), timeout=remaining
                 )
-                if from_nick is None or pm[1] == from_nick:
-                    return pm
-                # Put it back? No — just keep draining. PMs from other
-                # nicks are still dispatched to event handlers.
+                if cmd is not None and msg[1] != cmd:
+                    continue
+                if from_nick is not None and msg[2] != from_nick:
+                    continue
+                return msg
             except asyncio.TimeoutError:
                 raise asyncio.TimeoutError(
-                    f"No PM received within {timeout}s"
-                    + (f" from {from_nick}" if from_nick else "")
+                    f"No PB message received within {timeout}s"
                 )
 
     def get_chat_history(
