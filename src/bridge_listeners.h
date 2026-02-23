@@ -287,6 +287,13 @@ public:
                                     "Search flood: " + msg);
     }
 
+    void on(dcpp::ClientListener::NmdcPbMessage, dcpp::Client* c,
+            const std::string& cmd, const std::string& nick,
+            const std::string& data) noexcept override {
+        auto cb = getCallback();
+        if (cb) cb->onNmdcPbMessage(c->getHubUrl(), cmd, nick, data);
+    }
+
     // =================================================================
     // SearchManagerListener overrides
     // =================================================================

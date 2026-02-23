@@ -174,6 +174,27 @@ public:
                                             int maxLines = 50);
 
     // =====================================================================
+    // NMDCpb protobuf messaging
+    // =====================================================================
+
+    /// Send a $PB broadcast to the hub (requires hub NMDCpb support).
+    /// @param hubUrl     Hub URL
+    /// @param base64data Base64url-encoded PbEnvelope
+    void pbBroadcast(const std::string& hubUrl,
+                     const std::string& base64data);
+
+    /// Send a $PBR routed message to a specific user via the hub.
+    /// @param hubUrl     Hub URL
+    /// @param toNick     Recipient nick
+    /// @param base64data Base64url-encoded PbEnvelope
+    void pbRouted(const std::string& hubUrl,
+                  const std::string& toNick,
+                  const std::string& base64data);
+
+    /// Check if a hub supports the NMDCpb extension.
+    bool hubSupportsNmdcPb(const std::string& hubUrl);
+
+    // =====================================================================
     // Users
     // =====================================================================
 
