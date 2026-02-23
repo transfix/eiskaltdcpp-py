@@ -509,6 +509,58 @@ std::vector<std::string> DCBridge::getChatHistory(
 }
 
 // =========================================================================
+// NMDCpb protobuf messaging
+// =========================================================================
+
+void DCBridge::pbBroadcast(const std::string& hubUrl,
+                           const std::string& base64data) {
+    if (!m_initialized.load()) return;
+
+    Client* client;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        client = findClient(hubUrl);
+        if (!client) return;
+    }
+    // m_mutex released — safe to call into dcpp
+    auto* nmdcHub = dynamic_cast<NmdcHub*>(client);
+    if (nmdcHub) {
+        nmdcHub->pbBroadcast(base64data);
+    }
+}
+
+void DCBridge::pbRouted(const std::string& hubUrl,
+                        const std::string& toNick,
+                        const std::string& base64data) {
+    if (!m_initialized.load()) return;
+
+    Client* client;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        client = findClient(hubUrl);
+        if (!client) return;
+    }
+    // m_mutex released — safe to call into dcpp
+    auto* nmdcHub = dynamic_cast<NmdcHub*>(client);
+    if (nmdcHub) {
+        nmdcHub->pbRouted(toNick, base64data);
+    }
+}
+
+bool DCBridge::hubSupportsNmdcPb(const std::string& hubUrl) {
+    if (!m_initialized.load()) return false;
+
+    Client* client;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        client = findClient(hubUrl);
+        if (!client) return false;
+    }
+    auto* nmdcHub = dynamic_cast<NmdcHub*>(client);
+    return nmdcHub && nmdcHub->hasNmdcPbSupport();
+}
+
+// =========================================================================
 // Users
 // =========================================================================
 
