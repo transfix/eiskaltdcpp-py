@@ -109,7 +109,7 @@ if(NOT EISKALTDCPP_FOUND)
 
     FetchContent_Declare(eiskaltdcpp
         GIT_REPOSITORY https://github.com/transfix/eiskaltdcpp.git
-        GIT_TAG        fix/clean-shutdown
+        GIT_TAG        nmdcpb-extension
         GIT_SHALLOW    TRUE
     )
 
@@ -133,7 +133,38 @@ if(NOT EISKALTDCPP_FOUND)
     set(USE_MINIUPNP   ON  CACHE BOOL "" FORCE)
     set(PERL_REGEX     ON  CACHE BOOL "" FORCE)
 
-    FetchContent_MakeAvailable(eiskaltdcpp)
+    # Populate source dir so we can fix CMAKE_SOURCE_DIR vs PROJECT_SOURCE_DIR
+    # issues in the upstream CMakeLists before calling MakeAvailable.
+    FetchContent_Populate(eiskaltdcpp)
+
+    # The upstream CMakeLists.txt uses CMAKE_SOURCE_DIR (which resolves to
+    # *our* project root under FetchContent) instead of PROJECT_SOURCE_DIR.
+    # Provide the expected files so configure_file() calls succeed.
+    if(NOT EXISTS "${CMAKE_SOURCE_DIR}/Version.h.in")
+        file(COPY "${eiskaltdcpp_SOURCE_DIR}/Version.h.in"
+             DESTINATION "${CMAKE_SOURCE_DIR}")
+        set(_CLEANUP_VERSION_H_IN TRUE)
+    endif()
+    if(NOT EXISTS "${CMAKE_SOURCE_DIR}/cmake/cmake_uninstall.cmake.in")
+        file(MAKE_DIRECTORY "${CMAKE_SOURCE_DIR}/cmake")
+        file(COPY "${eiskaltdcpp_SOURCE_DIR}/cmake/cmake_uninstall.cmake.in"
+             DESTINATION "${CMAKE_SOURCE_DIR}/cmake")
+        set(_CLEANUP_UNINSTALL_IN TRUE)
+    endif()
+
+    add_subdirectory("${eiskaltdcpp_SOURCE_DIR}" "${eiskaltdcpp_BINARY_DIR}")
+
+    # Clean up temporary files we copied into our source tree
+    if(_CLEANUP_VERSION_H_IN)
+        file(REMOVE "${CMAKE_SOURCE_DIR}/Version.h.in")
+    endif()
+    if(_CLEANUP_UNINSTALL_IN)
+        file(REMOVE "${CMAKE_SOURCE_DIR}/cmake/cmake_uninstall.cmake.in")
+        file(GLOB _cmake_dir_contents "${CMAKE_SOURCE_DIR}/cmake/*")
+        if(NOT _cmake_dir_contents)
+            file(REMOVE_RECURSE "${CMAKE_SOURCE_DIR}/cmake")
+        endif()
+    endif()
 
     if(TARGET dcpp)
         add_library(eiskaltdcpp::dcpp ALIAS dcpp)
