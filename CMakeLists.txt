@@ -109,7 +109,8 @@ if(NOT EISKALTDCPP_FOUND)
 
     FetchContent_Declare(eiskaltdcpp
         GIT_REPOSITORY https://github.com/transfix/eiskaltdcpp.git
-        GIT_TAG        c9940e1e14fe374ba7012c9a29a0ab0136ef0f05
+        GIT_TAG        nmdcpb-extension
+        GIT_SHALLOW    TRUE
     )
 
     # Disable everything except the core library
