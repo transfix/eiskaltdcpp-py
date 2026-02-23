@@ -20,11 +20,17 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["dashboard"])
+
+
+@router.get("/", include_in_schema=False)
+async def root_redirect():
+    """Redirect the root URL to the dashboard."""
+    return RedirectResponse(url="/dashboard")
 
 
 DASHBOARD_HTML = r"""<!DOCTYPE html>

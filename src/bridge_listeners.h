@@ -187,12 +187,14 @@ public:
     }
 
     void on(dcpp::ClientListener::Connected, dcpp::Client* c) noexcept override {
+        refreshHubCache(c->getHubUrl(), c);
         auto cb = getCallback();
         if (cb) cb->onHubConnected(c->getHubUrl(), c->getHubName());
     }
 
     void on(dcpp::ClientListener::Failed, dcpp::Client* c,
             const std::string& reason) noexcept override {
+        markHubDisconnected(c->getHubUrl());
         auto cb = getCallback();
         if (cb) cb->onHubDisconnected(c->getHubUrl(), reason);
     }
@@ -209,6 +211,7 @@ public:
     }
 
     void on(dcpp::ClientListener::HubUpdated, dcpp::Client* c) noexcept override {
+        refreshHubCache(c->getHubUrl(), c);
         auto cb = getCallback();
         if (cb) cb->onHubUpdated(c->getHubUrl(), c->getHubName());
     }
@@ -257,6 +260,7 @@ public:
     void on(dcpp::ClientListener::UserUpdated, dcpp::Client* c,
             const dcpp::OnlineUser& ou) noexcept override {
         stashUserUpdate(c->getHubUrl(), ou);
+        refreshHubCache(c->getHubUrl(), c);
         auto cb = getCallback();
         if (cb) cb->onUserConnected(c->getHubUrl(), ou.getIdentity().getNick());
     }
@@ -268,11 +272,14 @@ public:
             stashUserUpdate(c->getHubUrl(), *ou);
             if (cb) cb->onUserUpdated(c->getHubUrl(), ou->getIdentity().getNick());
         }
+        // Refresh once after batch — user count / share total may have changed
+        refreshHubCache(c->getHubUrl(), c);
     }
 
     void on(dcpp::ClientListener::UserRemoved, dcpp::Client* c,
             const dcpp::OnlineUser& ou) noexcept override {
         stashUserRemove(c->getHubUrl(), ou.getIdentity().getNick());
+        refreshHubCache(c->getHubUrl(), c);
         auto cb = getCallback();
         if (cb) cb->onUserDisconnected(c->getHubUrl(), ou.getIdentity().getNick());
     }
@@ -445,6 +452,17 @@ private:
                          const std::string& nick);
 
     void clearHubUsers(const std::string& hubUrl);
+
+    /// Snapshot Client* accessors into HubData::cachedInfo under m_mutex.
+    /// MUST be called from the socket thread (callback context) where
+    /// Client* access is safe.  NmdcHub::cs is recursive, so calling
+    /// getUserCount() while already under cs (some callbacks fire under
+    /// cs) is fine.
+    void refreshHubCache(const std::string& hubUrl, dcpp::Client* c);
+
+    /// Lightweight cache update for disconnect — sets connected=false
+    /// without reading Client* accessors that may already be invalid.
+    void markHubDisconnected(const std::string& hubUrl);
 
     std::mutex m_mutex;
     DCBridge* m_bridge = nullptr;

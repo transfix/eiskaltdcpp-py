@@ -417,6 +417,12 @@ class AsyncDCClient:
             wait: If True, await connection completion
             timeout: Timeout in seconds when wait=True
         """
+        # Capture the running loop so that C++ socket-thread callbacks
+        # (which call _ensure_loop) can find it later.  Without this,
+        # _ensure_loop raises RuntimeError on the socket thread and the
+        # callback silently drops the event signal.
+        self._ensure_loop()
+
         if not self._sync_client.is_initialized:
             await self.initialize()
 
@@ -429,12 +435,23 @@ class AsyncDCClient:
         self, url: str, *, timeout: float = 30.0
     ) -> None:
         """Wait until connected to a specific hub."""
-        if self._sync_client.is_connected(url):
-            return
+        # Capture the running loop so callbacks on the C++ socket thread
+        # can signal the event via call_soon_threadsafe.
+        self._ensure_loop()
 
+        # Register the event FIRST, then check the state.  The Connected
+        # callback (fired from the C++ socket thread) looks up this event
+        # in _connect_events and signals it via call_soon_threadsafe.  If
+        # we checked is_connected() before registering, the callback could
+        # fire in the gap — find nothing to signal — and the event would
+        # never be set (TOCTOU race → spurious timeout).
         ev = asyncio.Event()
         self._connect_events[url] = ev
         try:
+            # Fast path: already connected (cache updated by
+            # refreshHubCache before the Python callback fires).
+            if self._sync_client.is_connected(url):
+                return
             await asyncio.wait_for(ev.wait(), timeout=timeout)
             if not self._sync_client.is_connected(url):
                 raise ConnectionError(
@@ -451,12 +468,15 @@ class AsyncDCClient:
         self, url: str, *, timeout: float = 10.0
     ) -> None:
         """Wait until disconnected from a specific hub."""
-        if not self._sync_client.is_connected(url):
-            return
+        self._ensure_loop()
 
+        # Register the event FIRST — same TOCTOU reasoning as
+        # wait_connected (see comment there).
         ev = asyncio.Event()
         self._disconnect_events[url] = ev
         try:
+            if not self._sync_client.is_connected(url):
+                return
             await asyncio.wait_for(ev.wait(), timeout=timeout)
         finally:
             self._disconnect_events.pop(url, None)
@@ -875,6 +895,36 @@ class AsyncDCClient:
 
     def pause_hashing(self, pause: bool = True) -> None:
         self._sync_client.pause_hashing(pause)
+
+    # ------------------------------------------------------------------
+    # Lua scripting
+    # ------------------------------------------------------------------
+
+    def lua_is_available(self) -> bool:
+        """Check if Lua scripting support is available."""
+        return self._sync_client.lua_is_available()
+
+    def lua_eval(self, code: str) -> None:
+        """Evaluate a Lua code chunk.
+
+        Raises LuaError subclasses on failure.
+        """
+        self._sync_client.lua_eval(code)
+
+    def lua_eval_file(self, path: str) -> None:
+        """Evaluate a Lua script file.
+
+        Raises LuaError subclasses on failure.
+        """
+        self._sync_client.lua_eval_file(path)
+
+    def lua_get_scripts_path(self) -> str:
+        """Get the Lua scripts directory path."""
+        return self._sync_client.lua_get_scripts_path()
+
+    def lua_list_scripts(self) -> list[str]:
+        """List Lua script files in the scripts directory."""
+        return self._sync_client.lua_list_scripts()
 
     # ------------------------------------------------------------------
     # Event stream (async iterator)

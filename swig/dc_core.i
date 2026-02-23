@@ -29,6 +29,32 @@
 %exception {
     try {
         $action
+    } catch (const eiskaltdcpp_py::LuaError& e) {
+        PyObject* _mod = PyImport_ImportModule("eiskaltdcpp.exceptions");
+        if (_mod) {
+            const char* _cls = "LuaError";
+            if (dynamic_cast<const eiskaltdcpp_py::LuaNotAvailableError*>(&e))
+                _cls = "LuaNotAvailableError";
+            else if (dynamic_cast<const eiskaltdcpp_py::LuaSymbolError*>(&e))
+                _cls = "LuaSymbolError";
+            else if (dynamic_cast<const eiskaltdcpp_py::LuaLoadError*>(&e))
+                _cls = "LuaLoadError";
+            else if (dynamic_cast<const eiskaltdcpp_py::LuaRuntimeError*>(&e))
+                _cls = "LuaRuntimeError";
+            PyObject* _exc = PyObject_GetAttrString(_mod, _cls);
+            if (_exc) {
+                PyErr_SetString(_exc, e.what());
+                Py_DECREF(_exc);
+            } else {
+                PyErr_Clear();
+                PyErr_SetString(PyExc_RuntimeError, e.what());
+            }
+            Py_DECREF(_mod);
+        } else {
+            PyErr_Clear();
+            PyErr_SetString(PyExc_RuntimeError, e.what());
+        }
+        SWIG_fail;
     } catch (const std::exception& e) {
         SWIG_exception(SWIG_RuntimeError, e.what());
     } catch (...) {
@@ -224,6 +250,13 @@ Example:
 // ============================================================================
 // Include the headers to generate wrappers
 // ============================================================================
+
+// Exception classes are handled in %exception — don't generate Python wrappers
+%ignore eiskaltdcpp_py::LuaError;
+%ignore eiskaltdcpp_py::LuaNotAvailableError;
+%ignore eiskaltdcpp_py::LuaSymbolError;
+%ignore eiskaltdcpp_py::LuaLoadError;
+%ignore eiskaltdcpp_py::LuaRuntimeError;
 
 %include "types.h"
 %include "callbacks.h"

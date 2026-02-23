@@ -28,9 +28,9 @@ classifiers = [
     "Topic :: Internet",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-
-[project.dependencies]
-click = ">=8.0"
+dependencies = [
+    "click>=8.0",
+]
 
 [project.optional-dependencies]
 api = [
@@ -40,10 +40,22 @@ api = [
     "bcrypt>=4.0",
     "pydantic>=2.0",
 ]
+test = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "pytest-timeout>=2.2",
+]
 api-test = [
     "httpx>=0.25",
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "pytest-timeout>=2.2",
+    "httpx>=0.25",
+    "ruff>=0.4",
 ]
 
 [project.scripts]
@@ -67,6 +79,13 @@ install.components = ["PythonModule"]
 
 [tool.scikit-build.cmake.define]
 BUILD_TESTS = "OFF"
+
+# --- Poetry settings ---
+# Poetry uses these to locate packages for editable installs (poetry install).
+# The actual wheel build is handled by scikit-build-core above.
+
+[tool.poetry]
+packages = [{include = "eiskaltdcpp", from = "python"}]
 
 # --- pytest ---
 

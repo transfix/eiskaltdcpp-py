@@ -4,6 +4,7 @@ from __future__ import annotations
 from eiskaltdcpp.api.routes.auth import router as auth_router
 from eiskaltdcpp.api.routes.chat import router as chat_router
 from eiskaltdcpp.api.routes.hubs import router as hubs_router
+from eiskaltdcpp.api.routes.lua import router as lua_router
 from eiskaltdcpp.api.routes.queue import router as queue_router
 from eiskaltdcpp.api.routes.search import router as search_router
 from eiskaltdcpp.api.routes.settings import router as settings_router
@@ -20,6 +21,7 @@ all_routers = [
     queue_router,
     shares_router,
     settings_router,
+    lua_router,
     status_router,
     ws_router,
     dashboard_router,

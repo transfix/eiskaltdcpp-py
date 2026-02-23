@@ -61,7 +61,13 @@ target_link_libraries(eiskaltdcpp_py_bridge
 # with the same define to match the ABI.
 if(EISKALTDCPP_HAS_LUA)
     target_compile_definitions(eiskaltdcpp_py_bridge PRIVATE LUA_SCRIPT)
-    # Lua headers needed by dcpp/ScriptManager.h
+    # Lua headers needed by dcpp/ScriptManager.h (which is pulled in
+    # transitively via dcpp/NmdcHub.h when LUA_SCRIPT is defined).
+    # We use them ONLY for type definitions (lua_State*, Lunar<T>);
+    # all actual Lua C API calls are resolved at runtime via dlsym
+    # from the same liblua that libeiskaltdcpp.so loaded, ensuring
+    # ABI compatibility even if the dev headers are a different Lua
+    # version than the runtime library.
     target_include_directories(eiskaltdcpp_py_bridge PRIVATE ${LUA_INCLUDE_DIR})
     # Our src/extra/lunar.h stub (ScriptManager.h includes "extra/lunar.h"
     # which is not installed by libeiskaltdcpp-dev)

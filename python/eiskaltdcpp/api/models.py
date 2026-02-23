@@ -306,3 +306,36 @@ class ErrorResponse(BaseModel):
     ok: bool = False
     error: str
     detail: str = ""
+
+
+# ============================================================================
+# Lua scripting models
+# ============================================================================
+
+class LuaEvalRequest(BaseModel):
+    """Request to evaluate Lua code."""
+    code: str
+
+
+class LuaEvalFileRequest(BaseModel):
+    """Request to evaluate a Lua script file."""
+    path: str
+
+
+class LuaEvalResponse(BaseModel):
+    """Result of a Lua evaluation."""
+    ok: bool
+    error: str = ""
+    error_type: str = ""
+
+
+class LuaStatusResponse(BaseModel):
+    """Lua scripting availability status."""
+    available: bool
+    scripts_path: str = ""
+
+
+class LuaScriptsResponse(BaseModel):
+    """List of Lua scripts."""
+    scripts_path: str
+    scripts: list[str]

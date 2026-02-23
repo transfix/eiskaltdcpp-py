@@ -32,6 +32,14 @@ from urllib.parse import urljoin
 
 import httpx
 
+from eiskaltdcpp.exceptions import (
+    LuaError,
+    LuaLoadError,
+    LuaNotAvailableError,
+    LuaRuntimeError,
+    LuaSymbolError,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -47,6 +55,9 @@ class HubInfo:
     connected: bool = False
     user_count: int = 0
     userCount: int = 0  # alias for compat
+    is_secure: bool = False
+    is_trusted: bool = False
+    cipher_name: str = ""
 
     def __post_init__(self):
         self.userCount = self.user_count
@@ -331,6 +342,18 @@ class RemoteDCClient:
         resp = await http.delete(path, headers=self._headers(), params=params)
         resp.raise_for_status()
         return resp.json()
+
+    @staticmethod
+    def _raise_lua_error(message: str, error_type: str = "") -> None:
+        """Raise a typed Lua exception from an API error response."""
+        _type_map = {
+            "LuaNotAvailableError": LuaNotAvailableError,
+            "LuaSymbolError": LuaSymbolError,
+            "LuaLoadError": LuaLoadError,
+            "LuaRuntimeError": LuaRuntimeError,
+        }
+        cls = _type_map.get(error_type, LuaError)
+        raise cls(message)
 
     async def close(self) -> None:
         """Close the HTTP client."""
@@ -649,6 +672,60 @@ class RemoteDCClient:
     async def pause_hashing_async(self, pause: bool = True) -> None:
         """Pause or resume file hashing."""
         await self._post("/api/status/hashing/pause", pause=pause)
+
+    # ---- Lua scripting ----
+
+    def lua_is_available(self) -> bool:
+        raise TypeError("Use await lua_is_available_async()")
+
+    async def lua_is_available_async(self) -> bool:
+        """Check if Lua scripting is available."""
+        data = await self._get("/api/lua/status")
+        return data.get("available", False)
+
+    def lua_eval(self, code: str) -> str:
+        raise TypeError("Use await lua_eval_async()")
+
+    async def lua_eval_async(self, code: str) -> None:
+        """Evaluate a Lua code chunk.
+
+        Raises LuaError subclasses on failure.
+        """
+        data = await self._post("/api/lua/eval", {"code": code})
+        if not data.get("ok", False):
+            error_msg = data.get("error", "Unknown Lua error")
+            error_type = data.get("error_type", "")
+            self._raise_lua_error(error_msg, error_type)
+
+    def lua_eval_file(self, path: str) -> str:
+        raise TypeError("Use await lua_eval_file_async()")
+
+    async def lua_eval_file_async(self, path: str) -> None:
+        """Evaluate a Lua file.
+
+        Raises LuaError subclasses on failure.
+        """
+        data = await self._post("/api/lua/eval-file", {"path": path})
+        if not data.get("ok", False):
+            error_msg = data.get("error", "Unknown Lua error")
+            error_type = data.get("error_type", "")
+            self._raise_lua_error(error_msg, error_type)
+
+    def lua_get_scripts_path(self) -> str:
+        raise TypeError("Use await lua_get_scripts_path_async()")
+
+    async def lua_get_scripts_path_async(self) -> str:
+        """Get the scripts directory path."""
+        data = await self._get("/api/lua/status")
+        return data.get("scripts_path", "")
+
+    def lua_list_scripts(self) -> list[str]:
+        raise TypeError("Use await lua_list_scripts_async()")
+
+    async def lua_list_scripts_async(self) -> list[str]:
+        """List Lua script files."""
+        data = await self._get("/api/lua/scripts")
+        return data.get("scripts", [])
 
     # ---- Status ----
 

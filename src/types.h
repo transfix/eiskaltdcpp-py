@@ -24,6 +24,9 @@ struct HubInfo {
     int64_t sharedBytes = 0;
     bool connected = false;
     bool isOp = false;
+    bool isSecure = false;         ///< TLS-encrypted connection to hub
+    bool isTrusted = false;        ///< Hub TLS certificate is trusted
+    std::string cipherName;        ///< TLS cipher in use (empty if not TLS)
 };
 
 /// Information about a hub user.

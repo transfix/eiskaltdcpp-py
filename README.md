@@ -12,7 +12,7 @@ This project wraps the eiskaltdcpp core C++ library via SWIG, providing:
 
 ### Features
 
-- Connect to NMDC and ADC hubs
+- Connect to NMDC and ADC hubs (with TLS encryption support)
 - Public and private chat
 - File search across connected hubs
 - Download queue management (including magnet links)
@@ -20,6 +20,7 @@ This project wraps the eiskaltdcpp core C++ library via SWIG, providing:
 - Share directory management
 - Transfer monitoring
 - File hashing control
+- Embedded Lua scripting with typed exception handling
 - Event-driven callback system (hub events, chat, users, transfers, etc.)
 
 ## Installation
@@ -231,6 +232,62 @@ eispy --url http://10.0.0.5:8080 --user admin --pass s3cret hub ls
 | `--url` | `EISPY_URL` | `http://127.0.0.1:8080` | API base URL |
 | `--user` | `EISPY_USER` | `admin` | API username |
 | `--pass` | `EISPY_PASS` | `changeme` | API password |
+| `--local` | `EISPY_LOCAL` | off | Use a local DC client instead of REST API |
+| `--config-dir` | `EISKALTDCPP_CONFIG_DIR` | `~/.eiskaltdcpp-py/` | Config directory for local mode |
+
+### Default config directory
+
+The DC client stores its configuration, settings, certificates, hash
+databases, and downloaded file lists in a **config directory**.  The
+default location is:
+
+```
+~/.eiskaltdcpp-py/
+```
+
+If the `$HOME` environment variable is not set, the fallback is
+`/tmp/.eiskaltdcpp-py/`.  You can override it with
+`--config-dir <path>` or the `EISKALTDCPP_CONFIG_DIR` environment
+variable.
+
+The config directory contains:
+
+| File / Directory | Purpose |
+|------------------|---------|
+| `DCPlusPlus.xml` | All DC++ settings (nick, ports, connection mode, etc.) |
+| `Favorites.xml` | Saved hub bookmarks |
+| `Queue.xml` | Persistent download queue |
+| `HashData/` | Tiger Tree Hash database (speeds up re-hashing) |
+| `FileLists/` | Downloaded user file lists |
+| `scripts/` | Lua scripts directory (see Lua scripting below) |
+| `Certificates/` | TLS certificates for secure hubs |
+
+### Local mode
+
+By default, remote operation commands (`hub`, `chat`, `search`, etc.)
+communicate with a running daemon via the REST API.  With `--local`,
+they instead spin up a **direct DC client instance** using the native
+C++ library — no daemon or API server required:
+
+```bash
+# Use a local client with default config dir (~/.eiskaltdcpp-py/)
+eispy --local hub ls
+eispy --local share ls
+eispy --local setting get Nick
+
+# Use a specific config directory
+eispy --local --config-dir /var/lib/dc hub ls
+
+# Environment variables work too
+export EISPY_LOCAL=1
+export EISKALTDCPP_CONFIG_DIR=/var/lib/dc
+eispy hub ls
+```
+
+> **Note:** Local mode requires the SWIG bindings to be installed
+> (i.e. the `dc_core` module must be available).  Some commands like
+> `user` (API user management) and `events` (WebSocket streaming) are
+> not available in local mode since they depend on the REST API.
 
 ### Server commands
 
@@ -380,6 +437,20 @@ Events stream until Ctrl-C.
 ```bash
 eispy shutdown                                    # gracefully stop daemon+API
 ```
+
+#### Lua scripting (`eispy lua`)
+
+```bash
+eispy lua status                                  # check Lua availability
+eispy lua ls                                      # list scripts in scripts dir
+eispy lua eval 'print("hello from lua")'          # evaluate Lua code
+eispy lua eval-file /path/to/script.lua           # run a Lua file
+```
+
+Lua scripting requires the DC client to be compiled with `LUA_SCRIPT=ON`
+(the default for eiskaltdcpp).  Scripts in the config directory's
+`scripts/` folder can be run directly.  See **Lua scripting** below for
+details.
 
 ### Daemon environment variables
 
@@ -531,6 +602,10 @@ app = create_app(
 | GET | `/api/status/transfers` | any | Transfer statistics |
 | GET | `/api/status/hashing` | any | Hashing status |
 | POST | `/api/status/hashing/pause` | admin | Pause/resume hashing |
+| GET | `/api/lua/status` | any | Check Lua availability |
+| GET | `/api/lua/scripts` | any | List Lua scripts |
+| POST | `/api/lua/eval` | admin | Evaluate Lua code |
+| POST | `/api/lua/eval-file` | admin | Run a Lua script file |
 | WS | `/ws/events` | token | Real-time event stream |
 | GET | `/dashboard` | — | Web dashboard (SPA) |
 | GET | `/api/docs` | — | Interactive Swagger UI |
@@ -739,6 +814,178 @@ eispy transfer resume-hash
 eispy share size
 ```
 
+## Lua scripting
+
+eiskaltdcpp supports embedded Lua scripting when compiled with
+`LUA_SCRIPT=ON` (the default).  Lua scripts can interact with the DC
+client — sending hub messages, reading settings, and hooking into
+events.
+
+### Checking availability
+
+```bash
+eispy lua status
+# Lua scripting: available
+# Scripts path:  /home/user/.eiskaltdcpp-py/scripts/
+```
+
+Or via the REST API:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/lua/status
+```
+
+Or in Python:
+
+```python
+client.lua_is_available()     # True / False
+client.lua_get_scripts_path() # "/home/user/.eiskaltdcpp-py/scripts/"
+```
+
+### Running Lua code
+
+```bash
+# Evaluate inline code
+eispy lua eval 'print("hello from lua")'
+
+# Run a script file
+eispy lua eval-file ~/.eiskaltdcpp-py/scripts/myscript.lua
+```
+
+Via the API:
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"code": "print(\"hello\")"}' \
+  http://localhost:8080/api/lua/eval
+```
+
+Via Python:
+
+```python
+from eiskaltdcpp.exceptions import LuaError, LuaRuntimeError, LuaLoadError
+
+try:
+    client.lua_eval('print("hello from lua")')
+except LuaRuntimeError as exc:
+    print(f"Runtime error: {exc}")
+except LuaLoadError as exc:
+    print(f"Load error: {exc}")
+
+try:
+    client.lua_eval_file("/path/to/script.lua")
+except LuaError as exc:
+    print(f"Lua error ({type(exc).__name__}): {exc}")
+```
+
+### Scripts directory
+
+Lua scripts are stored in `<config_dir>/scripts/`.  List them with:
+
+```bash
+eispy lua ls
+```
+
+eiskaltdcpp ships with 19 example scripts in `eiskaltdcpp/data/luascripts/`
+(antispam, chat formatting, auto-away, etc.).  Copy them to your
+scripts directory to use them:
+
+```bash
+cp eiskaltdcpp/data/luascripts/*.lua ~/.eiskaltdcpp-py/scripts/
+eispy lua ls
+```
+
+This project also includes purpose-built examples in `examples/lua/`:
+
+| Script | Description |
+|--------|-------------|
+| [`chat_logger.lua`](examples/lua/chat_logger.lua) | Log all hub chat to timestamped daily files |
+| [`auto_greet.lua`](examples/lua/auto_greet.lua) | Welcome users on join with configurable messages |
+| [`chat_commands.lua`](examples/lua/chat_commands.lua) | Custom `/slash` command framework (calc, dice, hubinfo, etc.) |
+| [`hub_monitor.lua`](examples/lua/hub_monitor.lua) | Track hub events, user counts, peak stats |
+| [`spam_filter.lua`](examples/lua/spam_filter.lua) | Block messages matching configurable keyword patterns |
+
+```bash
+# Run an example directly
+eispy lua eval-file examples/lua/chat_logger.lua
+
+# Or install to the scripts directory
+cp examples/lua/*.lua ~/.eiskaltdcpp-py/scripts/
+```
+
+### Lua API available to scripts
+
+When the full ScriptManager is initialized, Lua scripts have access to
+the `DC` table with these functions:
+
+| Function | Description |
+|----------|-------------|
+| `DC:SendHubMessage(hub, msg)` | Send a public chat message |
+| `DC:SendClientMessage(hub, nick, msg)` | Send a private message |
+| `DC:PrintDebug(msg)` | Print to debug log |
+| `DC:GetSetting(name)` | Read a DC setting |
+| `DC:GetAppPath()` | Application install path |
+| `DC:GetConfigPath()` | Config directory path |
+| `DC:GetScriptsPath()` | Scripts directory path |
+
+## Error handling
+
+Lua operations raise typed exceptions instead of returning error strings.
+All exception classes live in `eiskaltdcpp.exceptions` and inherit from
+`LuaError` (which extends Python's `RuntimeError`):
+
+| Exception | When raised |
+|-----------|-------------|
+| `LuaError` | Base class for all Lua errors |
+| `LuaNotAvailableError` | Lua scripting not compiled in (`LUA_SCRIPT=OFF`) |
+| `LuaSymbolError` | Lua C API symbols cannot be resolved at runtime |
+| `LuaLoadError` | Lua code failed to parse / compile |
+| `LuaRuntimeError` | Lua code compiled but raised an error during execution |
+
+Catch the base class to handle any Lua failure, or catch specific
+subclasses for fine-grained control:
+
+```python
+from eiskaltdcpp.exceptions import (
+    LuaError, LuaNotAvailableError, LuaLoadError, LuaRuntimeError,
+)
+
+try:
+    client.lua_eval('bad syntax (((')
+except LuaLoadError:
+    print("Code failed to compile")
+except LuaRuntimeError:
+    print("Runtime error in Lua")
+except LuaNotAvailableError:
+    print("Lua not available — recompile with LUA_SCRIPT=ON")
+except LuaError as exc:
+    print(f"Other Lua error: {exc}")
+```
+
+The REST API (`/api/lua/eval`, `/api/lua/eval-file`) returns the exception
+type in the `error_type` field of the response body when `ok` is `false`.
+
+## TLS encryption
+
+The DC client supports TLS-encrypted connections to hubs and peers.
+When listing connected hubs, each `HubInfo` object exposes TLS status:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `is_secure` | `bool` | `True` if the connection uses TLS |
+| `is_trusted` | `bool` | `True` if the server certificate is trusted |
+| `cipher_name` | `str` | TLS cipher suite name (e.g. `"TLS_AES_256_GCM_SHA384"`) |
+
+```python
+for hub in client.list_hubs():
+    tls = "TLS" if hub.is_secure else "plain"
+    print(f"{hub.hub_name}: {tls} ({hub.cipher_name or 'n/a'})")
+```
+
+Connect to TLS-enabled hubs using the `adcs://` (ADC+TLS) or `nmdcs://`
+(NMDC+TLS) URL schemes.
+
 ## Hashing and timing notes
 
 These are practical lessons learned from integration testing (against
@@ -846,7 +1093,13 @@ eiskaltdcpp-py/
 │   ├── file_list_browser.py    # File list browsing example
 │   ├── download_progress.py    # Transfer progress dashboard
 │   ├── share_manager.py        # Share management example
-│   └── multi_hub_bot.py        # Multi-hub bot example
+│   ├── multi_hub_bot.py        # Multi-hub bot example
+│   └── lua/                    # Lua scripting examples
+│       ├── chat_logger.lua     # Log hub chat to daily files
+│       ├── auto_greet.lua      # Welcome users on join
+│       ├── chat_commands.lua   # Custom /slash command framework
+│       ├── hub_monitor.lua     # Track hub events & user counts
+│       └── spam_filter.lua     # Block messages by keyword pattern
 ├── src/
 │   ├── CMakeLists.txt          # Static bridge library
 │   ├── bridge.h                # DCBridge class header
@@ -861,6 +1114,7 @@ eiskaltdcpp-py/
 ├── python/
 │   └── eiskaltdcpp/
 │       ├── __init__.py         # Package init
+│       ├── exceptions.py       # Typed Lua exception hierarchy
 │       ├── dc_client.py        # High-level Python wrapper
 │       ├── async_client.py     # Async wrapper
 │       ├── cli.py              # Unified Click CLI (daemon/api/up/stop/status)
@@ -882,6 +1136,7 @@ eiskaltdcpp-py/
 │               ├── queue.py    # /api/queue/*
 │               ├── shares.py   # /api/shares/*
 │               ├── settings.py # /api/settings/*
+│               ├── lua.py      # /api/lua/*
 │               └── status.py   # /api/status/*
 └── tests/
     ├── CMakeLists.txt          # Test configuration
@@ -891,6 +1146,8 @@ eiskaltdcpp-py/
     ├── test_client.py          # RemoteDCClient unit tests
     ├── test_websocket.py       # WebSocket tests
     ├── test_dashboard.py       # Dashboard tests
+    ├── test_cli_remote.py      # CLI remote + local mode tests
+    ├── test_lua_integration.py # Lua scripting integration tests
     ├── test_integration.py     # Live network integration tests
     └── test_remote_client_integration.py  # RemoteDCClient integration
 ```
