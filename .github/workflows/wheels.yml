@@ -93,6 +93,7 @@ jobs:
             openssl-devel zlib-devel bzip2-devel
             pcre-devel pcre2-devel lua-devel
             libidn-devel miniupnpc-devel
+            gettext-devel
             swig cmake gcc-c++ ninja-build
           CIBW_REPAIR_WHEEL_COMMAND_LINUX: >
             auditwheel repair -w {dest_dir} {wheel}

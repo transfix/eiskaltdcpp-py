@@ -42,13 +42,13 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential \
+            build-essential gettext \
             cmake swig python3-dev \
             libssl-dev zlib1g-dev libbz2-dev \
             libminiupnpc-dev libidn2-dev libpcre2-dev \
             liblua5.4-dev || \
           sudo apt-get install -y --no-install-recommends \
-            build-essential \
+            build-essential gettext \
             cmake swig python3-dev \
             libssl-dev zlib1g-dev libbz2-dev \
             libminiupnpc-dev libidn2-dev libpcre2-dev \
@@ -125,7 +125,7 @@ jobs:
         run: |
           vcpkg install --triplet x64-windows `
             openssl bzip2 zlib miniupnpc pcre2 lua `
-            libiconv libidn2
+            libiconv libidn2 gettext
 
       - name: Install SWIG
         run: choco install swig -y --no-progress
@@ -179,7 +179,7 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          brew install cmake swig openssl@3 miniupnpc libidn2 pcre2 lua bzip2
+          brew install cmake swig openssl@3 miniupnpc libidn2 pcre2 lua bzip2 gettext
 
       - name: Install Python dependencies
         run: |
@@ -196,7 +196,7 @@ jobs:
             -DUSE_SYSTEM_EISKALTDCPP=OFF \
             -DBUILD_TESTS=ON \
             -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" \
-            -DCMAKE_PREFIX_PATH="$(brew --prefix openssl@3);$(brew --prefix bzip2);$(brew --prefix pcre2);$(brew --prefix miniupnpc);$(brew --prefix libidn2);$(brew --prefix lua)" \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix openssl@3);$(brew --prefix bzip2);$(brew --prefix pcre2);$(brew --prefix miniupnpc);$(brew --prefix libidn2);$(brew --prefix lua);$(brew --prefix gettext)" \
             -DPython3_EXECUTABLE=$(which python)
 
       - name: Build
@@ -231,7 +231,7 @@ jobs:
           prepare: |
             pkg install -y cmake swig python311 py311-pip \
               openssl bzip2 miniupnpc libidn2-0 pcre2 lua54 \
-              gcc ninja-build
+              gettext-tools gcc ninja-build
           run: |
             set -e
             python3.11 -m pip install --break-system-packages pytest click
@@ -266,7 +266,7 @@ jobs:
           prepare: |
             pkg_add cmake swig python-3.11.10 py3-pip \
               bzip2 miniupnpc libidn2 pcre2 lua-5.4.7 \
-              ninja
+              gettext-tools ninja
           run: |
             set -e
             pip3.11 install pytest click
@@ -301,7 +301,7 @@ jobs:
           prepare: |
             pkg_add cmake swig python312 py312-pip \
               bzip2 miniupnpc libidn2 pcre2 lua54 \
-              gcc13 ninja-build
+              gettext-tools gcc13 ninja-build
           run: |
             set -e
             pip3.12 install pytest click
@@ -336,7 +336,7 @@ jobs:
           prepare: |
             pkg install -y cmake swig python311 py311-pip \
               openssl bzip2 miniupnpc libidn2 pcre2 lua54 \
-              ninja
+              gettext-tools ninja
           run: |
             set -e
             python3.11 -m pip install pytest click
@@ -373,7 +373,7 @@ jobs:
               developer/swig library/security/openssl-3 \
               library/zlib compress/bzip2 library/pcre2 \
               runtime/lua developer/build/gnu-make \
-              developer/gcc14
+              developer/gcc14 text/gnu-gettext
           run: |
             set -e
             pip3.12 install pytest click
@@ -407,7 +407,7 @@ jobs:
         run: |
           apt-get update -qq
           apt-get install -y --no-install-recommends \
-            cmake git ca-certificates python3-dev swig
+            cmake git ca-certificates python3-dev swig gettext
 
       - name: Cross-compile for Haiku
         run: |
@@ -459,7 +459,7 @@ jobs:
           sudo dpkg --add-architecture i386
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            cmake git ca-certificates swig python3-dev \
+            cmake git ca-certificates swig python3-dev gettext \
             gcc-i686-linux-gnu g++-i686-linux-gnu \
             libssl-dev:i386 zlib1g-dev:i386 libbz2-dev:i386 || true
 
@@ -536,13 +536,13 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential \
+            build-essential gettext \
             cmake swig python3-dev \
             libssl-dev zlib1g-dev libbz2-dev \
             libminiupnpc-dev libidn2-dev libpcre2-dev \
             liblua5.4-dev || \
           sudo apt-get install -y --no-install-recommends \
-            build-essential \
+            build-essential gettext \
             cmake swig python3-dev \
             libssl-dev zlib1g-dev libbz2-dev \
             libminiupnpc-dev libidn2-dev libpcre2-dev \
