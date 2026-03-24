@@ -179,7 +179,7 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          brew install cmake swig openssl@3 miniupnpc libidn2 pcre2 lua bzip2 gettext
+          brew install cmake swig openssl@3 miniupnpc libidn2 pcre2 lua bzip2 gettext gcc
 
       - name: Install Python dependencies
         run: |
@@ -188,11 +188,13 @@ jobs:
             fastapi "uvicorn[standard]" "python-jose[cryptography]" bcrypt pydantic httpx
 
       - name: Configure
-        env:
-          OPENSSL_ROOT_DIR: /opt/homebrew/opt/openssl@3
         run: |
+          # Apple Clang lacks std::jthread — use Homebrew GCC for full C++20
+          GCC_VER=$(ls /opt/homebrew/bin/g++-* 2>/dev/null | grep -oE '[0-9]+$' | sort -n | tail -1)
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="$(brew --prefix gcc)/bin/gcc-${GCC_VER}" \
+            -DCMAKE_CXX_COMPILER="$(brew --prefix gcc)/bin/g++-${GCC_VER}" \
             -DUSE_SYSTEM_EISKALTDCPP=OFF \
             -DBUILD_TESTS=ON \
             -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" \
