@@ -253,7 +253,7 @@ bool DCBridge::initialize(const std::string& configDir) {
     // Ensure a nick is set — without one the NMDC handshake sends an empty
     // $ValidateNick which the hub rejects, leaving connected=false forever.
     {
-        auto* sm = SettingsManager::getInstance();
+        auto* sm = getContext()->getSettingsManager();
         std::string currentNick = sm->get(SettingsManager::NICK, true);
         if (currentNick.empty()) {
             // Generate a default nick: "dcpy-<pid>"
@@ -268,7 +268,7 @@ bool DCBridge::initialize(const std::string& configDir) {
     initLuaScriptingIfPresent();
 
     // Start the timer (drives periodic events) — not done by startup()
-    TimerManager::getInstance()->start();
+    getContext()->getTimerManager()->start();
 
     // Subscribe listeners to global managers
     BridgeListeners::getInstance().setBridge(this);
@@ -312,7 +312,7 @@ void DCBridge::shutdown() {
     // m_mutex released — safe to call into dcpp (avoids ABBA deadlock)
     for (auto* client : clients) {
         client->disconnect(true);
-        ClientManager::getInstance()->putClient(client);
+        getContext()->getClientManager()->putClient(client);
     }
 
     // Drain all background I/O threads BEFORE touching any managers or
@@ -322,7 +322,7 @@ void DCBridge::shutdown() {
     // If hub sockets are still running at that point, their threads
     // crash dereferencing destroyed singletons.  Pre-draining here
     // ensures every socket thread has exited first.
-    ConnectionManager::getInstance()->shutdown();
+    getContext()->getConnectionManager()->shutdown();
     BufferedSocket::waitShutdown();
 
     // Close the Lua state we created in initLuaScriptingIfPresent().
@@ -384,7 +384,7 @@ void DCBridge::connectHub(const std::string& url,
 
     // m_mutex released — safe to call into dcpp (avoids ABBA deadlock
     // with ClientManager::cs / NmdcHub::cs held by hub socket threads)
-    Client* client = ClientManager::getInstance()->getClient(url);
+    Client* client = getContext()->getClientManager()->getClient(url);
     if (!client) return;
 
     if (!encoding.empty()) {
@@ -421,7 +421,7 @@ void DCBridge::disconnectHub(const std::string& url) {
     if (client) {
         BridgeListeners::getInstance().detach(client);
         client->disconnect(true);
-        ClientManager::getInstance()->putClient(client);
+        getContext()->getClientManager()->putClient(client);
     }
 }
 
@@ -482,10 +482,10 @@ void DCBridge::sendPM(const std::string& hubUrl,
     }
     // m_mutex released — safe to call into dcpp (avoids ABBA deadlock
     // with NmdcHub::cs / ClientManager::cs held by the hub socket thread)
-    UserPtr user = ClientManager::getInstance()->findUser(nick, hubUrl);
+    UserPtr user = getContext()->getClientManager()->findUser(nick, hubUrl);
     if (user) {
         HintedUser hu(user, hubUrl);
-        ClientManager::getInstance()->privateMessage(hu, message, false);
+        getContext()->getClientManager()->privateMessage(hu, message, false);
     }
 }
 
@@ -540,9 +540,9 @@ UserInfo DCBridge::getUserInfo(const std::string& nick,
     }
 
     // m_mutex released — safe to call ClientManager (avoids ABBA deadlock)
-    UserPtr user = ClientManager::getInstance()->findUser(nick, hubUrl);
+    UserPtr user = getContext()->getClientManager()->findUser(nick, hubUrl);
     if (user) {
-        Identity id = ClientManager::getInstance()->getOnlineUserIdentity(user);
+        Identity id = getContext()->getClientManager()->getOnlineUserIdentity(user);
         ui.description = id.getDescription();
         ui.connection = id.getConnection();
         ui.email = id.getEmail();
@@ -569,7 +569,7 @@ bool DCBridge::search(const std::string& query, int fileType,
     }
 
     // m_mutex released — safe to call SearchManager (avoids ABBA deadlock)
-    auto sm = SearchManager::getInstance();
+    auto* sm = getContext()->getSearchManager();
     auto token = Util::toString(Util::rand());
 
     if (hubUrl.empty()) {
@@ -645,7 +645,7 @@ bool DCBridge::addToQueue(const std::string& directory,
         if (!target.empty() && target.back() != '/') target += '/';
         target += name;
 
-        QueueManager::getInstance()->add(target, size,
+        getContext()->getQueueManager()->add(target, size,
             TTHValue(tth), HintedUser(),
             QueueItem::FLAG_NORMAL);
         return true;
@@ -695,7 +695,7 @@ bool DCBridge::addMagnet(const std::string& magnetLink,
 void DCBridge::removeFromQueue(const std::string& target) {
     if (!m_initialized.load()) return;
     try {
-        QueueManager::getInstance()->remove(target);
+        getContext()->getQueueManager()->remove(target);
     } catch (const Exception&) {}
 }
 
@@ -703,14 +703,14 @@ void DCBridge::moveQueueItem(const std::string& source,
                              const std::string& target) {
     if (!m_initialized.load()) return;
     try {
-        QueueManager::getInstance()->move(source, target);
+        getContext()->getQueueManager()->move(source, target);
     } catch (const Exception&) {}
 }
 
 void DCBridge::setPriority(const std::string& target, int priority) {
     if (!m_initialized.load()) return;
     try {
-        QueueManager::getInstance()->setPriority(
+        getContext()->getQueueManager()->setPriority(
             target,
             static_cast<QueueItem::Priority>(priority));
     } catch (const Exception&) {}
@@ -720,7 +720,7 @@ std::vector<QueueItemInfo> DCBridge::listQueue() {
     std::vector<QueueItemInfo> result;
     if (!m_initialized.load()) return result;
 
-    const QueueItem::StringMap& ll = QueueManager::getInstance()->lockQueue();
+    const QueueItem::StringMap& ll = getContext()->getQueueManager()->lockQueue();
     for (const auto& item : ll) {
         QueueItem* qi = item.second;
         QueueItemInfo info;
@@ -735,7 +735,7 @@ std::vector<QueueItemInfo> DCBridge::listQueue() {
         info.status = qi->isFinished() ? 2 : (qi->isRunning() ? 1 : 0);
         result.push_back(std::move(info));
     }
-    QueueManager::getInstance()->unlockQueue();
+    getContext()->getQueueManager()->unlockQueue();
 
     return result;
 }
@@ -743,7 +743,7 @@ std::vector<QueueItemInfo> DCBridge::listQueue() {
 void DCBridge::clearQueue() {
     if (!m_initialized.load()) return;
     // Collect all targets first, then remove outside the lock
-    auto* qm = QueueManager::getInstance();
+    auto* qm = getContext()->getQueueManager();
     std::vector<std::string> targets;
     const QueueItem::StringMap& ll = qm->lockQueue();
     for (const auto& item : ll) {
@@ -779,10 +779,10 @@ bool DCBridge::requestFileList(const std::string& hubUrl,
     }
 
     // m_mutex released — safe to call ClientManager/QueueManager
-    UserPtr user = ClientManager::getInstance()->findUser(nick, hubUrl);
+    UserPtr user = getContext()->getClientManager()->findUser(nick, hubUrl);
     if (user) {
         try {
-            QueueManager::getInstance()->addList(
+            getContext()->getQueueManager()->addList(
                 HintedUser(user, hubUrl),
                 matchQueue ? QueueItem::FLAG_MATCH_QUEUE : 0,
                 "");
@@ -829,7 +829,7 @@ bool DCBridge::openFileList(const std::string& fileListId) {
 
     // Get a hub URL hint for the user (needed for download connections)
     std::string hubHint;
-    auto hubs = ClientManager::getInstance()->getHubUrls(user->getCID());
+    auto hubs = getContext()->getClientManager()->getHubUrls(user->getCID());
     if (!hubs.empty()) {
         hubHint = hubs.front();
     }
@@ -979,7 +979,7 @@ bool DCBridge::downloadFileFromList(const std::string& fileListId,
     // between m_mutex and dcpp internal locks / GIL)
 
     try {
-        QueueManager::getInstance()->add(target, fileSize, fileTTH, hintedUser, 0);
+        getContext()->getQueueManager()->add(target, fileSize, fileTTH, hintedUser, 0);
     } catch (const Exception&) {
         return false;
     }
@@ -1074,7 +1074,7 @@ bool DCBridge::addShareDir(const std::string& realPath,
         path += PATH_SEPARATOR;
 
     try {
-        ShareManager::getInstance()->addDirectory(path, virtualName);
+        getContext()->getShareManager()->addDirectory(path, virtualName);
         return true;
     } catch (const Exception&) {
         return false;
@@ -1084,7 +1084,7 @@ bool DCBridge::addShareDir(const std::string& realPath,
 bool DCBridge::removeShareDir(const std::string& realPath) {
     if (!m_initialized.load()) return false;
     try {
-        ShareManager::getInstance()->removeDirectory(realPath);
+        getContext()->getShareManager()->removeDirectory(realPath);
         return true;
     } catch (const Exception&) {
         return false;
@@ -1095,7 +1095,7 @@ bool DCBridge::renameShareDir(const std::string& realPath,
                               const std::string& newVirtName) {
     if (!m_initialized.load()) return false;
     try {
-        ShareManager::getInstance()->renameDirectory(realPath, newVirtName);
+        getContext()->getShareManager()->renameDirectory(realPath, newVirtName);
         return true;
     } catch (const Exception&) {
         return false;
@@ -1106,7 +1106,7 @@ std::vector<ShareDirInfo> DCBridge::listShare() {
     std::vector<ShareDirInfo> result;
     if (!m_initialized.load()) return result;
 
-    auto dirs = ShareManager::getInstance()->getDirectories();
+    auto dirs = getContext()->getShareManager()->getDirectories();
     for (auto& [virt, real] : dirs) {
         ShareDirInfo sdi;
         sdi.realPath = real;
@@ -1118,18 +1118,18 @@ std::vector<ShareDirInfo> DCBridge::listShare() {
 
 void DCBridge::refreshShare() {
     if (!m_initialized.load()) return;
-    ShareManager::getInstance()->setDirty();
-    ShareManager::getInstance()->refresh(true, true, false);
+    getContext()->getShareManager()->setDirty();
+    getContext()->getShareManager()->refresh(true, true, false);
 }
 
 int64_t DCBridge::getShareSize() {
     if (!m_initialized.load()) return 0;
-    return ShareManager::getInstance()->getShareSize();
+    return getContext()->getShareManager()->getShareSize();
 }
 
 int64_t DCBridge::getSharedFileCount() {
     if (!m_initialized.load()) return 0;
-    return ShareManager::getInstance()->getSharedFiles();
+    return getContext()->getShareManager()->getSharedFiles();
 }
 
 // =========================================================================
@@ -1140,12 +1140,12 @@ TransferStats DCBridge::getTransferStats() {
     TransferStats stats;
     if (!m_initialized.load()) return stats;
 
-    stats.downloadSpeed = DownloadManager::getInstance()->getRunningAverage();
-    stats.uploadSpeed = UploadManager::getInstance()->getRunningAverage();
+    stats.downloadSpeed = getContext()->getDownloadManager()->getRunningAverage();
+    stats.uploadSpeed = getContext()->getUploadManager()->getRunningAverage();
     stats.totalDownloaded = SETTING(TOTAL_DOWNLOAD);
     stats.totalUploaded = SETTING(TOTAL_UPLOAD);
-    stats.downloadCount = DownloadManager::getInstance()->getDownloadCount();
-    stats.uploadCount = UploadManager::getInstance()->getUploadCount();
+    stats.downloadCount = getContext()->getDownloadManager()->getDownloadCount();
+    stats.uploadCount = getContext()->getUploadManager()->getUploadCount();
     return stats;
 }
 
@@ -1160,7 +1160,7 @@ HashStatus DCBridge::getHashStatus() {
     std::string file;
     uint64_t bytesLeft = 0;
     size_t filesLeft = 0;
-    HashManager::getInstance()->getStats(file, bytesLeft, filesLeft);
+    getContext()->getHashManager()->getStats(file, bytesLeft, filesLeft);
     hs.currentFile = file;
     hs.bytesLeft = bytesLeft;
     hs.filesLeft = filesLeft;
@@ -1170,9 +1170,9 @@ HashStatus DCBridge::getHashStatus() {
 void DCBridge::pauseHashing(bool pause) {
     if (!m_initialized.load()) return;
     if (pause) {
-        HashManager::getInstance()->pauseHashing();
+        getContext()->getHashManager()->pauseHashing();
     } else {
-        HashManager::getInstance()->resumeHashing();
+        getContext()->getHashManager()->resumeHashing();
     }
 }
 
@@ -1183,7 +1183,7 @@ void DCBridge::pauseHashing(bool pause) {
 std::string DCBridge::getSetting(const std::string& name) {
     if (!m_initialized.load()) return "";
 
-    auto* sm = SettingsManager::getInstance();
+    auto* sm = getContext()->getSettingsManager();
 
     // Resolve setting name → enum index + type.
     int n = 0;
@@ -1207,7 +1207,7 @@ void DCBridge::setSetting(const std::string& name,
                           const std::string& value) {
     if (!m_initialized.load()) return;
 
-    auto* sm = SettingsManager::getInstance();
+    auto* sm = getContext()->getSettingsManager();
 
     int n = 0;
     SettingsManager::Types type{};
@@ -1228,7 +1228,7 @@ void DCBridge::setSetting(const std::string& name,
 
 void DCBridge::reloadConfig() {
     if (!m_initialized.load()) return;
-    SettingsManager::getInstance()->load();
+    getContext()->getSettingsManager()->load();
 }
 
 // =========================================================================
@@ -1354,8 +1354,8 @@ std::string DCBridge::getVersion() {
 // =========================================================================
 
 void DCBridge::startNetworking() {
-    ConnectivityManager::getInstance()->setup(true);
-    ClientManager::getInstance()->infoUpdated();
+    getContext()->getConnectivityManager()->setup(true);
+    getContext()->getClientManager()->infoUpdated();
 }
 
 // =========================================================================

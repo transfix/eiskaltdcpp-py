@@ -22,6 +22,7 @@
 #include <dcpp/ClientManager.h>
 #include <dcpp/ChatMessage.h>
 #include <dcpp/CID.h>
+#include <dcpp/DCPlusPlus.h>
 #include <dcpp/Download.h>
 #include <dcpp/DownloadManager.h>
 #include <dcpp/DownloadManagerListener.h>
@@ -79,7 +80,7 @@ inline SearchResultInfo infoFromSearchResult(const dcpp::SearchResultPtr& sr) {
     sri.hubUrl = sr->getHubURL();
     sri.hubName = sr->getHubName();
     {
-        auto nicks = dcpp::ClientManager::getInstance()->getNicks(
+        auto nicks = dcpp::getContext()->getClientManager()->getNicks(
             sr->getUser()->getCID(), sr->getHubURL());
         sri.nick = nicks.empty() ? "" : nicks[0];
     }
@@ -95,7 +96,7 @@ inline TransferInfo infoFromDownload(const dcpp::Download* dl) {
     ti.speed = static_cast<int64_t>(dl->getAverageSpeed());
     ti.isDownload = true;
     if (dl->getHintedUser().user) {
-        auto nicks = dcpp::ClientManager::getInstance()->getNicks(dl->getHintedUser());
+        auto nicks = dcpp::getContext()->getClientManager()->getNicks(dl->getHintedUser());
         ti.nick = nicks.empty() ? "" : nicks[0];
         ti.hubUrl = dl->getHintedUser().hint;
     }
@@ -110,7 +111,7 @@ inline TransferInfo infoFromUpload(const dcpp::Upload* ul) {
     ti.speed = static_cast<int64_t>(ul->getAverageSpeed());
     ti.isDownload = false;
     if (ul->getHintedUser().user) {
-        auto nicks = dcpp::ClientManager::getInstance()->getNicks(ul->getHintedUser());
+        auto nicks = dcpp::getContext()->getClientManager()->getNicks(ul->getHintedUser());
         ti.nick = nicks.empty() ? "" : nicks[0];
         ti.hubUrl = ul->getHintedUser().hint;
     }
@@ -149,20 +150,20 @@ public:
 
     /// Subscribe to global managers (call once after dcpp::startup)
     void subscribeGlobal() {
-        dcpp::SearchManager::getInstance()->addListener(this);
-        dcpp::QueueManager::getInstance()->addListener(this);
-        dcpp::DownloadManager::getInstance()->addListener(this);
-        dcpp::UploadManager::getInstance()->addListener(this);
-        dcpp::TimerManager::getInstance()->addListener(this);
+        dcpp::getContext()->getSearchManager()->addListener(this);
+        dcpp::getContext()->getQueueManager()->addListener(this);
+        dcpp::getContext()->getDownloadManager()->addListener(this);
+        dcpp::getContext()->getUploadManager()->addListener(this);
+        dcpp::getContext()->getTimerManager()->addListener(this);
     }
 
     /// Unsubscribe from global managers (call before dcpp::shutdown)
     void unsubscribeGlobal() {
-        dcpp::TimerManager::getInstance()->removeListener(this);
-        dcpp::UploadManager::getInstance()->removeListener(this);
-        dcpp::DownloadManager::getInstance()->removeListener(this);
-        dcpp::QueueManager::getInstance()->removeListener(this);
-        dcpp::SearchManager::getInstance()->removeListener(this);
+        dcpp::getContext()->getTimerManager()->removeListener(this);
+        dcpp::getContext()->getUploadManager()->removeListener(this);
+        dcpp::getContext()->getDownloadManager()->removeListener(this);
+        dcpp::getContext()->getQueueManager()->removeListener(this);
+        dcpp::getContext()->getSearchManager()->removeListener(this);
     }
 
     /// Attach to a specific hub client
