@@ -240,8 +240,8 @@ jobs:
           usesh: true
           prepare: |
             pkg install -y cmake swig python311 py311-pip \
-              openssl bzip2 miniupnpc libidn2-0 pcre2 lua54 \
-              gettext-tools gcc ninja-build
+              openssl bzip2 miniupnpc libidn2 pcre2 lua54 \
+              gettext-tools ninja git
           run: |
             set -e
             python3.11 -m pip install --break-system-packages pytest click
@@ -274,9 +274,9 @@ jobs:
           release: "7.6"
           usesh: true
           prepare: |
-            pkg_add cmake swig python-3.11.10 py3-pip \
-              bzip2 miniupnpc libidn2 pcre2 lua-5.4.7 \
-              gettext-tools ninja
+            pkg_add cmake swig python%3.11 py3-pip \
+              miniupnpc libidn2 pcre2 lua%5.4 \
+              gettext-tools ninja git
           run: |
             set -e
             pip3.11 install pytest click
@@ -309,9 +309,9 @@ jobs:
           release: "10.1"
           usesh: true
           prepare: |
-            pkg_add cmake swig python312 py312-pip \
-              bzip2 miniupnpc libidn2 pcre2 lua54 \
-              gettext-tools gcc13 ninja-build
+            /usr/sbin/pkg_add cmake swig python312 py312-pip \
+              bzip2 libidn2 pcre2 lua54 \
+              gettext-tools gcc13 ninja-build git
           run: |
             set -e
             pip3.12 install pytest click
@@ -319,6 +319,8 @@ jobs:
               -DCMAKE_BUILD_TYPE=Release \
               -DUSE_SYSTEM_EISKALTDCPP=OFF \
               -DBUILD_TESTS=ON \
+              -DCMAKE_C_COMPILER=gcc-13 \
+              -DCMAKE_CXX_COMPILER=g++-13 \
               -DPython3_EXECUTABLE=$(which python3.12)
             cmake --build build -j$(sysctl -n hw.ncpu)
             cd build && ctest --output-on-failure -j$(sysctl -n hw.ncpu)
@@ -346,7 +348,7 @@ jobs:
           prepare: |
             pkg install -y cmake swig python311 py311-pip \
               openssl bzip2 miniupnpc libidn2 pcre2 lua54 \
-              gettext-tools ninja
+              gettext-tools ninja gcc13 git
           run: |
             set -e
             python3.11 -m pip install pytest click
@@ -354,6 +356,8 @@ jobs:
               -DCMAKE_BUILD_TYPE=Release \
               -DUSE_SYSTEM_EISKALTDCPP=OFF \
               -DBUILD_TESTS=ON \
+              -DCMAKE_C_COMPILER=gcc13 \
+              -DCMAKE_CXX_COMPILER=g++13 \
               -DPython3_EXECUTABLE=$(which python3.11)
             cmake --build build -j$(sysctl -n hw.ncpu)
             cd build && ctest --output-on-failure -j$(sysctl -n hw.ncpu)
@@ -379,138 +383,28 @@ jobs:
           usesh: true
           prepare: |
             pkg install \
-              developer/build/cmake runtime/python-312 \
+              ooce/developer/cmake runtime/python-312 \
               developer/swig library/security/openssl-3 \
               library/zlib compress/bzip2 library/pcre2 \
-              runtime/lua developer/build/gnu-make \
-              developer/gcc14 text/gnu-gettext
+              developer/build/gnu-make \
+              developer/gcc14 text/gnu-gettext \
+              ooce/developer/ninja developer/versioning/git
           run: |
             set -e
-            pip3.12 install pytest click
-            cmake -B build \
+            python3.12 -m pip install pytest click
+            export PATH="/opt/gcc-14/bin:/opt/ooce/bin:$PATH"
+            cmake -B build -G Ninja \
               -DCMAKE_BUILD_TYPE=Release \
               -DUSE_SYSTEM_EISKALTDCPP=OFF \
               -DBUILD_TESTS=ON \
+              -DCMAKE_C_COMPILER=/opt/gcc-14/bin/gcc \
+              -DCMAKE_CXX_COMPILER=/opt/gcc-14/bin/g++ \
               -DPython3_EXECUTABLE=$(which python3.12)
             cmake --build build -j$(nproc)
             cd build && ctest --output-on-failure -j$(nproc)
             cd ..
             PYTHONPATH=build/python python3.12 -m pytest tests/ -v --tb=short \
               --ignore=tests/test_integration.py
-
-  # ─── Haiku (cross-compile from Linux) ─────────────────────────────
-  cross-compile-haiku:
-    name: Haiku (cross-compile)
-    runs-on: ubuntu-24.04
-    continue-on-error: true
-    timeout-minutes: 30
-
-    container:
-      image: docker.io/haiku/cross-compiler:x86_64-r1beta4
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install host build tools
-        run: |
-          apt-get update -qq
-          apt-get install -y --no-install-recommends \
-            cmake git ca-certificates python3 python3-dev swig gettext
-
-      - name: Cross-compile for Haiku
-        run: |
-          set -e
-          # Haiku cross-compiler sysroot
-          SYSROOT=/tools/cross-tools-x86_64
-          HAIKU_TRIPLE=x86_64-unknown-haiku
-
-          cat > /tmp/haiku-toolchain.cmake <<'EOF'
-          set(CMAKE_SYSTEM_NAME Haiku)
-          set(CMAKE_SYSTEM_PROCESSOR x86_64)
-          set(CMAKE_C_COMPILER   x86_64-unknown-haiku-gcc)
-          set(CMAKE_CXX_COMPILER x86_64-unknown-haiku-g++)
-          set(CMAKE_FIND_ROOT_PATH /tools/cross-tools-x86_64/sysroot)
-          set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
-          set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
-          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
-          set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
-          EOF
-
-          # Use host Python for SWIG generation, target won't have Python
-          cmake -B build \
-            -DCMAKE_TOOLCHAIN_FILE=/tmp/haiku-toolchain.cmake \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DUSE_SYSTEM_EISKALTDCPP=OFF \
-            -DBUILD_TESTS=OFF \
-            -DPython3_EXECUTABLE=$(which python3) \
-            -DPython3_INCLUDE_DIRS=$(python3 -c "import sysconfig; print(sysconfig.get_path('include'))") \
-            -DPython3_LIBRARIES="" \
-            || echo "::warning::CMake configure failed — see log for details"
-
-          cmake --build build -j$(nproc) \
-            || echo "::warning::Build failed — see log for details"
-
-  # ─── GNU/Hurd (cross-compile from Linux) ──────────────────────────
-  cross-compile-hurd:
-    name: GNU/Hurd (cross-compile)
-    runs-on: ubuntu-24.04
-    continue-on-error: true
-    timeout-minutes: 30
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install cross-compiler and dependencies
-        run: |
-          sudo dpkg --add-architecture i386
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            cmake git ca-certificates swig python3 python3-dev gettext \
-            gcc-i686-linux-gnu g++-i686-linux-gnu \
-            libssl-dev:i386 zlib1g-dev:i386 libbz2-dev:i386 || true
-
-          # Hurd cross-compiler is not in Ubuntu repos, fall back to
-          # generic i686 Linux cross-compile as a closest approximation.
-          # The real value is testing compilation on a 32-bit non-Linux target.
-
-      - name: Cross-compile for i686 (Hurd approximation)
-        run: |
-          set -e
-          PY_INC=$(python3 -c "import sysconfig; print(sysconfig.get_path('include'))")
-          PY_VER=$(python3 -c "import sysconfig; print(sysconfig.get_config_var('LDVERSION'))")
-          PY_LIBDIR=$(python3 -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))")
-
-          cat > /tmp/hurd-toolchain.cmake <<EOF
-          set(CMAKE_SYSTEM_NAME GNU)
-          set(CMAKE_SYSTEM_PROCESSOR i686)
-          set(CMAKE_C_COMPILER   i686-linux-gnu-gcc)
-          set(CMAKE_CXX_COMPILER i686-linux-gnu-g++)
-          set(CMAKE_FIND_ROOT_PATH /usr/i686-linux-gnu)
-          set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
-          set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY BOTH)
-          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE BOTH)
-          set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)
-          # Force host Python so SWIG wrapper generation works
-          set(Python3_EXECUTABLE $(which python3))
-          set(Python3_INCLUDE_DIRS ${PY_INC})
-          set(Python3_LIBRARIES ${PY_LIBDIR}/libpython${PY_VER}.so)
-          set(Python3_VERSION $(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')"))
-          set(Python3_FOUND TRUE)
-          EOF
-
-          cmake -B build \
-            -DCMAKE_TOOLCHAIN_FILE=/tmp/hurd-toolchain.cmake \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DUSE_SYSTEM_EISKALTDCPP=OFF \
-            -DBUILD_TESTS=OFF \
-            || echo "::warning::CMake configure failed — see log for details"
-
-          cmake --build build -j$(nproc) \
-            || echo "::warning::Build failed — see log for details"
 
   integration:
     name: Integration tests
@@ -523,8 +417,6 @@ jobs:
       - build-and-test-netbsd
       - build-and-test-dragonflybsd
       - build-and-test-omnios
-      - cross-compile-haiku
-      - cross-compile-hurd
     runs-on: [self-hosted, linux, x64]
     timeout-minutes: 15
 
