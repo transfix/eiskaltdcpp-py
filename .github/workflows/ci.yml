@@ -188,12 +188,15 @@ jobs:
             fastapi "uvicorn[standard]" "python-jose[cryptography]" bcrypt pydantic httpx
 
       - name: Configure
+        env:
+          OPENSSL_ROOT_DIR: /opt/homebrew/opt/openssl@3
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DUSE_SYSTEM_EISKALTDCPP=OFF \
             -DBUILD_TESTS=ON \
             -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix openssl@3);$(brew --prefix bzip2);$(brew --prefix pcre2);$(brew --prefix miniupnpc);$(brew --prefix libidn2);$(brew --prefix lua)" \
             -DPython3_EXECUTABLE=$(which python)
 
       - name: Build
@@ -213,7 +216,7 @@ jobs:
     name: FreeBSD
     runs-on: ubuntu-latest
     continue-on-error: true
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -223,23 +226,24 @@ jobs:
       - name: Build & test in FreeBSD VM
         uses: vmactions/freebsd-vm@v1
         with:
+          release: "14.2"
           usesh: true
           prepare: |
-            pkg install -y cmake swig python3 py311-pip \
-              openssl bzip2 miniupnpc libidn2 pcre2 lua54 \
-              gcc ninja
+            pkg install -y cmake swig python311 py311-pip \
+              openssl bzip2 miniupnpc libidn2-0 pcre2 lua54 \
+              gcc ninja-build
           run: |
             set -e
-            python3 -m pip install --break-system-packages pytest click
+            python3.11 -m pip install --break-system-packages pytest click
             cmake -B build \
               -DCMAKE_BUILD_TYPE=Release \
               -DUSE_SYSTEM_EISKALTDCPP=OFF \
               -DBUILD_TESTS=ON \
-              -DPython3_EXECUTABLE=$(which python3)
+              -DPython3_EXECUTABLE=$(which python3.11)
             cmake --build build -j$(sysctl -n hw.ncpu)
             cd build && ctest --output-on-failure -j$(sysctl -n hw.ncpu)
             cd ..
-            PYTHONPATH=build/python python3 -m pytest tests/ -v --tb=short \
+            PYTHONPATH=build/python python3.11 -m pytest tests/ -v --tb=short \
               --ignore=tests/test_integration.py
 
   # ─── OpenBSD ──────────────────────────────────────────────────────
@@ -247,7 +251,7 @@ jobs:
     name: OpenBSD
     runs-on: ubuntu-latest
     continue-on-error: true
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -257,23 +261,24 @@ jobs:
       - name: Build & test in OpenBSD VM
         uses: vmactions/openbsd-vm@v1
         with:
+          release: "7.6"
           usesh: true
           prepare: |
-            pkg_add cmake swig python3 py3-pip \
-              bzip2 miniupnpc libidn2 pcre2 lua--%5.4 \
-              gcc ninja
+            pkg_add cmake swig python-3.11.10 py3-pip \
+              bzip2 miniupnpc libidn2 pcre2 lua-5.4.7 \
+              ninja
           run: |
             set -e
-            pip3 install --break-system-packages pytest click
+            pip3.11 install pytest click
             cmake -B build \
               -DCMAKE_BUILD_TYPE=Release \
               -DUSE_SYSTEM_EISKALTDCPP=OFF \
               -DBUILD_TESTS=ON \
-              -DPython3_EXECUTABLE=$(which python3)
+              -DPython3_EXECUTABLE=$(which python3.11)
             cmake --build build -j$(sysctl -n hw.ncpu)
             cd build && ctest --output-on-failure -j$(sysctl -n hw.ncpu)
             cd ..
-            PYTHONPATH=build/python python3 -m pytest tests/ -v --tb=short \
+            PYTHONPATH=build/python python3.11 -m pytest tests/ -v --tb=short \
               --ignore=tests/test_integration.py
 
   # ─── NetBSD ───────────────────────────────────────────────────────
@@ -281,7 +286,7 @@ jobs:
     name: NetBSD
     runs-on: ubuntu-latest
     continue-on-error: true
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -291,14 +296,15 @@ jobs:
       - name: Build & test in NetBSD VM
         uses: vmactions/netbsd-vm@v1
         with:
+          release: "10.1"
           usesh: true
           prepare: |
-            /usr/sbin/pkg_add cmake swig python312 py312-pip \
+            pkg_add cmake swig python312 py312-pip \
               bzip2 miniupnpc libidn2 pcre2 lua54 \
               gcc13 ninja-build
           run: |
             set -e
-            pip3.12 install --break-system-packages pytest click
+            pip3.12 install pytest click
             cmake -B build \
               -DCMAKE_BUILD_TYPE=Release \
               -DUSE_SYSTEM_EISKALTDCPP=OFF \
@@ -315,7 +321,7 @@ jobs:
     name: DragonflyBSD
     runs-on: ubuntu-latest
     continue-on-error: true
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -325,23 +331,24 @@ jobs:
       - name: Build & test in DragonflyBSD VM
         uses: vmactions/dragonflybsd-vm@v1
         with:
+          release: "6.4.0"
           usesh: true
           prepare: |
-            pkg install -y cmake swig python3 py311-pip \
+            pkg install -y cmake swig python311 py311-pip \
               openssl bzip2 miniupnpc libidn2 pcre2 lua54 \
-              gcc13 ninja
+              ninja
           run: |
             set -e
-            pip install --break-system-packages pytest click
+            python3.11 -m pip install pytest click
             cmake -B build \
               -DCMAKE_BUILD_TYPE=Release \
               -DUSE_SYSTEM_EISKALTDCPP=OFF \
               -DBUILD_TESTS=ON \
-              -DPython3_EXECUTABLE=$(which python3)
+              -DPython3_EXECUTABLE=$(which python3.11)
             cmake --build build -j$(sysctl -n hw.ncpu)
             cd build && ctest --output-on-failure -j$(sysctl -n hw.ncpu)
             cd ..
-            PYTHONPATH=build/python python3 -m pytest tests/ -v --tb=short \
+            PYTHONPATH=build/python python3.11 -m pytest tests/ -v --tb=short \
               --ignore=tests/test_integration.py
 
   # ─── OmniOS (illumos/Solaris) ─────────────────────────────────────
@@ -389,7 +396,7 @@ jobs:
     timeout-minutes: 30
 
     container:
-      image: docker.io/haiku/cross-compiler:x86_64-r1beta5
+      image: docker.io/haiku/cross-compiler:x86_64-r1beta4
 
     steps:
       - uses: actions/checkout@v4
@@ -463,16 +470,26 @@ jobs:
       - name: Cross-compile for i686 (Hurd approximation)
         run: |
           set -e
-          cat > /tmp/hurd-toolchain.cmake <<'EOF'
+          PY_INC=$(python3 -c "import sysconfig; print(sysconfig.get_path('include'))")
+          PY_VER=$(python3 -c "import sysconfig; print(sysconfig.get_config_var('LDVERSION'))")
+          PY_LIBDIR=$(python3 -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))")
+
+          cat > /tmp/hurd-toolchain.cmake <<EOF
           set(CMAKE_SYSTEM_NAME GNU)
           set(CMAKE_SYSTEM_PROCESSOR i686)
           set(CMAKE_C_COMPILER   i686-linux-gnu-gcc)
           set(CMAKE_CXX_COMPILER i686-linux-gnu-g++)
           set(CMAKE_FIND_ROOT_PATH /usr/i686-linux-gnu)
           set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
-          set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+          set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY BOTH)
           set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE BOTH)
-          set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+          set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)
+          # Force host Python so SWIG wrapper generation works
+          set(Python3_EXECUTABLE $(which python3))
+          set(Python3_INCLUDE_DIRS ${PY_INC})
+          set(Python3_LIBRARIES ${PY_LIBDIR}/libpython${PY_VER}.so)
+          set(Python3_VERSION $(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')"))
+          set(Python3_FOUND TRUE)
           EOF
 
           cmake -B build \
@@ -480,9 +497,6 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DUSE_SYSTEM_EISKALTDCPP=OFF \
             -DBUILD_TESTS=OFF \
-            -DPython3_EXECUTABLE=$(which python3) \
-            -DPython3_INCLUDE_DIRS=$(python3 -c "import sysconfig; print(sysconfig.get_path('include'))") \
-            -DPython3_LIBRARIES="" \
             || echo "::warning::CMake configure failed — see log for details"
 
           cmake --build build -j$(nproc) \
