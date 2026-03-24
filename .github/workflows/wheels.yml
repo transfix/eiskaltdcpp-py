@@ -101,12 +101,15 @@ jobs:
           # ── Windows ─────────────────────────────────────────────
           CIBW_BEFORE_ALL_WINDOWS: >
             vcpkg install --triplet x64-windows
-            openssl bzip2 zlib miniupnpc pcre2 lua libiconv libidn2 &&
+            openssl bzip2 zlib miniupnpc pcre2 lua libiconv libidn2 gettext &&
+            C:\msys64\usr\bin\pacman.exe -S --noconfirm --needed gettext &&
             choco install swig -y --no-progress
           CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: >
             delvewheel repair -w {dest_dir} {wheel}
             --add-path "C:/vcpkg/installed/x64-windows/bin"
           CIBW_ENVIRONMENT_WINDOWS: >
+            VCPKG_BINARY_SOURCES="clear;x-gha,readwrite"
+            PATH="C:\\msys64\\usr\\bin;$PATH"
             CMAKE_ARGS="-DUSE_SYSTEM_EISKALTDCPP=OFF
             -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake"
 
