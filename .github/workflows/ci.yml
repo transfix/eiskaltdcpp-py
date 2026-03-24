@@ -208,9 +208,190 @@ jobs:
           PYTHONPATH=build/python python -m pytest tests/ -v --tb=short \
             --ignore=tests/test_integration.py
 
+  # ─── FreeBSD ──────────────────────────────────────────────────────
+  build-and-test-freebsd:
+    name: FreeBSD
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build & test in FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          prepare: |
+            pkg install -y cmake swig python3 py311-pip \
+              openssl bzip2 miniupnpc libidn2 pcre2 lua54 \
+              gcc ninja
+          run: |
+            set -e
+            python3 -m pip install --break-system-packages pytest click
+            cmake -B build \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DUSE_SYSTEM_EISKALTDCPP=OFF \
+              -DBUILD_TESTS=ON \
+              -DPython3_EXECUTABLE=$(which python3)
+            cmake --build build -j$(sysctl -n hw.ncpu)
+            cd build && ctest --output-on-failure -j$(sysctl -n hw.ncpu)
+            cd ..
+            PYTHONPATH=build/python python3 -m pytest tests/ -v --tb=short \
+              --ignore=tests/test_integration.py
+
+  # ─── OpenBSD ──────────────────────────────────────────────────────
+  build-and-test-openbsd:
+    name: OpenBSD
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build & test in OpenBSD VM
+        uses: vmactions/openbsd-vm@v1
+        with:
+          usesh: true
+          prepare: |
+            pkg_add cmake swig python3 py3-pip \
+              bzip2 miniupnpc libidn2 pcre2 lua--%5.4 \
+              gcc ninja
+          run: |
+            set -e
+            pip3 install --break-system-packages pytest click
+            cmake -B build \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DUSE_SYSTEM_EISKALTDCPP=OFF \
+              -DBUILD_TESTS=ON \
+              -DPython3_EXECUTABLE=$(which python3)
+            cmake --build build -j$(sysctl -n hw.ncpu)
+            cd build && ctest --output-on-failure -j$(sysctl -n hw.ncpu)
+            cd ..
+            PYTHONPATH=build/python python3 -m pytest tests/ -v --tb=short \
+              --ignore=tests/test_integration.py
+
+  # ─── NetBSD ───────────────────────────────────────────────────────
+  build-and-test-netbsd:
+    name: NetBSD
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build & test in NetBSD VM
+        uses: vmactions/netbsd-vm@v1
+        with:
+          usesh: true
+          prepare: |
+            /usr/sbin/pkg_add cmake swig python312 py312-pip \
+              bzip2 miniupnpc libidn2 pcre2 lua54 \
+              gcc13 ninja-build
+          run: |
+            set -e
+            pip3.12 install --break-system-packages pytest click
+            cmake -B build \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DUSE_SYSTEM_EISKALTDCPP=OFF \
+              -DBUILD_TESTS=ON \
+              -DPython3_EXECUTABLE=$(which python3.12)
+            cmake --build build -j$(sysctl -n hw.ncpu)
+            cd build && ctest --output-on-failure -j$(sysctl -n hw.ncpu)
+            cd ..
+            PYTHONPATH=build/python python3.12 -m pytest tests/ -v --tb=short \
+              --ignore=tests/test_integration.py
+
+  # ─── DragonflyBSD ─────────────────────────────────────────────────
+  build-and-test-dragonflybsd:
+    name: DragonflyBSD
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build & test in DragonflyBSD VM
+        uses: vmactions/dragonflybsd-vm@v1
+        with:
+          usesh: true
+          prepare: |
+            pkg install -y cmake swig python3 py311-pip \
+              openssl bzip2 miniupnpc libidn2 pcre2 lua54 \
+              gcc13 ninja
+          run: |
+            set -e
+            pip install --break-system-packages pytest click
+            cmake -B build \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DUSE_SYSTEM_EISKALTDCPP=OFF \
+              -DBUILD_TESTS=ON \
+              -DPython3_EXECUTABLE=$(which python3)
+            cmake --build build -j$(sysctl -n hw.ncpu)
+            cd build && ctest --output-on-failure -j$(sysctl -n hw.ncpu)
+            cd ..
+            PYTHONPATH=build/python python3 -m pytest tests/ -v --tb=short \
+              --ignore=tests/test_integration.py
+
+  # ─── OmniOS (illumos/Solaris) ─────────────────────────────────────
+  build-and-test-omnios:
+    name: OmniOS (illumos)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build & test in OmniOS VM
+        uses: vmactions/omnios-vm@v1
+        with:
+          usesh: true
+          prepare: |
+            pkg install \
+              developer/build/cmake runtime/python-312 \
+              developer/swig library/security/openssl-3 \
+              library/zlib compress/bzip2 library/pcre2 \
+              runtime/lua developer/build/gnu-make \
+              developer/gcc14
+          run: |
+            set -e
+            pip3.12 install pytest click
+            cmake -B build \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DUSE_SYSTEM_EISKALTDCPP=OFF \
+              -DBUILD_TESTS=ON \
+              -DPython3_EXECUTABLE=$(which python3.12)
+            cmake --build build -j$(nproc)
+            cd build && ctest --output-on-failure -j$(nproc)
+            cd ..
+            PYTHONPATH=build/python python3.12 -m pytest tests/ -v --tb=short \
+              --ignore=tests/test_integration.py
+
   integration:
     name: Integration tests
-    needs: [build-and-test, build-and-test-windows, build-and-test-macos]
+    needs:
+      - build-and-test
+      - build-and-test-windows
+      - build-and-test-macos
+      - build-and-test-freebsd
+      - build-and-test-openbsd
+      - build-and-test-netbsd
+      - build-and-test-dragonflybsd
+      - build-and-test-omnios
     runs-on: [self-hosted, linux, x64]
     timeout-minutes: 15
 
