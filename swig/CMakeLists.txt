@@ -52,10 +52,13 @@ set_target_properties(dc_core PROPERTIES
 
 # Platform-specific suffix
 if(WIN32)
-    set_target_properties(dc_core PROPERTIES SUFFIX ".pyd")
+    set(_DC_CORE_SUFFIX ".pyd")
+elseif(APPLE)
+    set(_DC_CORE_SUFFIX ".so")  # Python extensions use .so even on macOS
 else()
-    set_target_properties(dc_core PROPERTIES SUFFIX ".so")
+    set(_DC_CORE_SUFFIX ".so")
 endif()
+set_target_properties(dc_core PROPERTIES SUFFIX "${_DC_CORE_SUFFIX}")
 
 # Ensure the output directory and Python source files exist in build tree
 add_custom_command(TARGET dc_core POST_BUILD
@@ -86,19 +89,35 @@ add_custom_command(TARGET dc_core POST_BUILD
 # Dev symlinks — so that "poetry install" (editable) and PYTHONPATH=python/
 # can find the SWIG artifacts without having to set PYTHONPATH=build/python/.
 # These are gitignored (*.so globally, dc_core.py explicitly).
+# On Windows, use copy instead of symlinks (symlinks need admin privileges).
 # ---------------------------------------------------------------------------
-add_custom_command(TARGET dc_core POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E create_symlink
-        ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/_dc_core.so
-        ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/_dc_core.so
-    COMMAND ${CMAKE_COMMAND} -E create_symlink
-        ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/dc_core.py
-        ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/dc_core.py
-    COMMAND ${CMAKE_COMMAND} -E create_symlink
-        ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/_version.py
-        ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/_version.py
-    COMMENT "Dev symlinks created in python/eiskaltdcpp/ for editable installs"
-)
+if(WIN32)
+    add_custom_command(TARGET dc_core POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/_dc_core${_DC_CORE_SUFFIX}
+            ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/_dc_core${_DC_CORE_SUFFIX}
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/dc_core.py
+            ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/dc_core.py
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/_version.py
+            ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/_version.py
+        COMMENT "Dev copies created in python/eiskaltdcpp/ for editable installs"
+    )
+else()
+    add_custom_command(TARGET dc_core POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E create_symlink
+            ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/_dc_core${_DC_CORE_SUFFIX}
+            ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/_dc_core${_DC_CORE_SUFFIX}
+        COMMAND ${CMAKE_COMMAND} -E create_symlink
+            ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/dc_core.py
+            ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/dc_core.py
+        COMMAND ${CMAKE_COMMAND} -E create_symlink
+            ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/_version.py
+            ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/_version.py
+        COMMENT "Dev symlinks created in python/eiskaltdcpp/ for editable installs"
+    )
+endif()
 
 # Ensure _version.py is also in the build tree for tests
 add_custom_command(TARGET dc_core POST_BUILD

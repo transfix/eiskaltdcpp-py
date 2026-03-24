@@ -142,13 +142,11 @@ if(NOT EISKALTDCPP_FOUND)
     if(NOT eiskaltdcpp_POPULATED)
         FetchContent_Populate(eiskaltdcpp)
         # Patch CMAKE_SOURCE_DIR/CMAKE_BINARY_DIR -> CMAKE_CURRENT_* for FetchContent compat
-        execute_process(
-            COMMAND sed -i
-                -e "s/\${CMAKE_SOURCE_DIR}/\${CMAKE_CURRENT_SOURCE_DIR}/g"
-                -e "s/\${CMAKE_BINARY_DIR}/\${CMAKE_CURRENT_BINARY_DIR}/g"
-                CMakeLists.txt
-            WORKING_DIRECTORY "${eiskaltdcpp_SOURCE_DIR}"
-        )
+        # Uses portable CMake commands instead of sed so this works on Windows too.
+        file(READ "${eiskaltdcpp_SOURCE_DIR}/CMakeLists.txt" _eiskaltdcpp_cml)
+        string(REPLACE "\${CMAKE_SOURCE_DIR}" "\${CMAKE_CURRENT_SOURCE_DIR}" _eiskaltdcpp_cml "${_eiskaltdcpp_cml}")
+        string(REPLACE "\${CMAKE_BINARY_DIR}" "\${CMAKE_CURRENT_BINARY_DIR}" _eiskaltdcpp_cml "${_eiskaltdcpp_cml}")
+        file(WRITE "${eiskaltdcpp_SOURCE_DIR}/CMakeLists.txt" "${_eiskaltdcpp_cml}")
         # Disable eiskaltdcpp's own tests (BUILD_TESTS leaks from parent)
         set(_save_build_tests "${BUILD_TESTS}")
         set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
