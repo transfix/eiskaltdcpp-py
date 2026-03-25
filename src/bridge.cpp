@@ -373,7 +373,7 @@ void DCBridge::shutdown() {
     // All socket threads are stopped, so no concurrent access is
     // possible.  ScriptManager::~ScriptManager() checks for null and
     // will skip its own lua_close().
-#ifdef LUA_SCRIPT
+#if defined(LUA_SCRIPT) && !defined(_WIN32)
     {
         lua_State** lua_state_ptr = resolveLuaStatePtr();
         if (lua_state_ptr && *lua_state_ptr && s_lua_close) {
@@ -1291,7 +1291,7 @@ void DCBridge::reloadConfig() {
 // =========================================================================
 
 bool DCBridge::luaIsAvailable() const {
-#ifdef LUA_SCRIPT
+#if defined(LUA_SCRIPT) && !defined(_WIN32)
     lua_State** lua_state_ptr = resolveLuaStatePtr();
     return (lua_state_ptr != nullptr && *lua_state_ptr != nullptr);
 #else
@@ -1302,7 +1302,7 @@ bool DCBridge::luaIsAvailable() const {
 void DCBridge::luaEval(const std::string& code) {
     if (!m_initialized.load()) throw LuaError("bridge not initialized");
 
-#ifdef LUA_SCRIPT
+#if defined(LUA_SCRIPT) && !defined(_WIN32)
     lua_State** lua_state_ptr = resolveLuaStatePtr();
     if (!lua_state_ptr || !*lua_state_ptr)
         throw LuaNotAvailableError();
@@ -1337,7 +1337,7 @@ void DCBridge::luaEval(const std::string& code) {
 void DCBridge::luaEvalFile(const std::string& path) {
     if (!m_initialized.load()) throw LuaError("bridge not initialized");
 
-#ifdef LUA_SCRIPT
+#if defined(LUA_SCRIPT) && !defined(_WIN32)
     lua_State** lua_state_ptr = resolveLuaStatePtr();
     if (!lua_state_ptr || !*lua_state_ptr)
         throw LuaNotAvailableError();
