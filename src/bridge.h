@@ -33,6 +33,7 @@ class DCClientCallback;
 // Forward declare dcpp types we use (avoid including heavy headers here)
 namespace dcpp {
 class Client;
+class DCContext;
 class SearchResult;
 class DirectoryListing;
 }
@@ -380,6 +381,7 @@ private:
 
     // State
     std::atomic<bool> m_initialized{false};
+    std::unique_ptr<dcpp::DCContext> m_context;  // owns the dcpp core context
     DCClientCallback* m_callback = nullptr;
     mutable std::mutex m_mutex;
     std::string m_configDir;  // resolved config directory (with trailing slash)

@@ -16,6 +16,7 @@
 #include "dcpp_compat.h"  // must precede dcpp headers (provides STL + using decls)
 
 #include <dcpp/DCPlusPlus.h>
+#include <dcpp/DCContext.h>
 #include <dcpp/Util.h>
 #include <dcpp/BufferedSocket.h>
 #include <dcpp/Client.h>
@@ -255,9 +256,9 @@ bool DCBridge::initialize(const std::string& configDir) {
     pathOverrides[Util::PATH_USER_LOCAL] = cfgDir;
     Util::initialize(pathOverrides);
 
-    // Start the core library — creates all singleton managers, loads
+    // Start the core library — creates DCContext with all managers, loads
     // settings, favorites, certificates, hashing, share refresh, and queue.
-    dcpp::startup(startupCallback, nullptr);
+    m_context = dcpp::startup(startupCallback, nullptr);
 
     // Mark as globally started (must come after startup() succeeds)
     g_dcppStarted.store(true);
@@ -386,9 +387,11 @@ void DCBridge::shutdown() {
     // Shut down core library — the redundant ConnectionManager::shutdown()
     // and BufferedSocket::waitShutdown() calls inside are harmless
     // (idempotent / already drained).
-    dcpp::shutdown();
+    m_context->shutdown();
+    m_context.reset();
+    dcpp::setContext(nullptr);
 
-    // Allow re-initialization — dcpp singletons have been destroyed so a
+    // Allow re-initialization — dcpp context has been destroyed so a
     // fresh dcpp::startup() is safe.
     {
         std::lock_guard<std::mutex> glock(g_dcppStartupMutex);
