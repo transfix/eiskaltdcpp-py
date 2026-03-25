@@ -135,9 +135,21 @@ jobs:
             python -m pytest {project}/tests/ -v --tb=short
             --ignore={project}/tests/test_integration.py
 
+      - name: Compute artifact name
+        id: artifact
+        shell: bash
+        run: |
+          VERSION=$(grep 'project.*VERSION' CMakeLists.txt | head -1 | sed 's/.*VERSION *\([^ )]*\).*/\1/')
+          SHA=$(git rev-parse --short HEAD)
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "name=eiskaltdcpp-py-${VERSION}-${SHA}-${{ matrix.os }}-${{ matrix.arch }}-wheels" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=eiskaltdcpp-py-${VERSION}~dev-${SHA}-${{ matrix.os }}-${{ matrix.arch }}-wheels" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}-${{ matrix.arch }}
+          name: ${{ steps.artifact.outputs.name }}
           path: wheelhouse/*.whl
 
   # ─── Build source distribution ──────────────────────────────────
@@ -157,9 +169,20 @@ jobs:
       - name: Build sdist
         run: python -m pip install build && python -m build --sdist --outdir dist
 
+      - name: Compute artifact name
+        id: artifact
+        run: |
+          VERSION=$(grep 'project.*VERSION' CMakeLists.txt | head -1 | sed 's/.*VERSION *\([^ )]*\).*/\1/')
+          SHA=$(git rev-parse --short HEAD)
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "name=eiskaltdcpp-py-${VERSION}-${SHA}-sdist" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=eiskaltdcpp-py-${VERSION}~dev-${SHA}-sdist" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
-          name: sdist
+          name: ${{ steps.artifact.outputs.name }}
           path: dist/*.tar.gz
 
   # ─── Publish to PyPI (only on tag push) ─────────────────────────

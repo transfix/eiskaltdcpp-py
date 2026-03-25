@@ -80,6 +80,28 @@ jobs:
           PYTHONPATH=build/python python -m pytest tests/ -v --tb=short \
             --ignore=tests/test_integration.py
 
+      - name: Compute artifact name
+        id: artifact
+        run: |
+          VERSION=$(grep 'project.*VERSION' CMakeLists.txt | head -1 | sed 's/.*VERSION *\([^ )]*\).*/\1/')
+          SHA=$(git rev-parse --short HEAD)
+          ARCH=$(uname -m)
+          if ${{ contains(toJSON(matrix.runner), 'ubuntu') }}; then
+            OS=linux
+          else
+            OS=linux-selfhosted
+          fi
+          PYVER=$(echo "${{ matrix.python-version }}" | tr -d '.')
+          echo "name=eiskaltdcpp-py-${VERSION}~dev-${SHA}-${OS}-${ARCH}-py${PYVER}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifact
+        if: contains(toJSON(matrix.runner), 'ubuntu')
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: build/python/
+          retention-days: 14
+
   build-and-test-windows:
     name: Windows (${{ matrix.python-version }})
     runs-on: windows-latest
@@ -159,6 +181,23 @@ jobs:
           python -m pytest tests/ -v --tb=short `
             --ignore=tests/test_integration.py
 
+      - name: Compute artifact name
+        id: artifact
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path CMakeLists.txt -Pattern 'project.*VERSION\s+([^ )]+)').Matches[0].Groups[1].Value
+          $sha = git rev-parse --short HEAD
+          $pyver = '${{ matrix.python-version }}' -replace '\.',''
+          $name = "eiskaltdcpp-py-${version}~dev-${sha}-windows-x64-py${pyver}"
+          echo "name=$name" >> $env:GITHUB_OUTPUT
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: build/python/
+          retention-days: 14
+
   build-and-test-macos:
     name: macOS (${{ matrix.python-version }})
     runs-on: macos-latest
@@ -221,6 +260,22 @@ jobs:
         run: |
           PYTHONPATH=build/python python -m pytest tests/ -v --tb=short \
             --ignore=tests/test_integration.py
+
+      - name: Compute artifact name
+        id: artifact
+        run: |
+          VERSION=$(grep 'project.*VERSION' CMakeLists.txt | head -1 | sed 's/.*VERSION *\([^ )]*\).*/\1/')
+          SHA=$(git rev-parse --short HEAD)
+          ARCH=$(uname -m)
+          PYVER=$(echo "${{ matrix.python-version }}" | tr -d '.')
+          echo "name=eiskaltdcpp-py-${VERSION}~dev-${SHA}-macos-${ARCH}-py${PYVER}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: build/python/
+          retention-days: 14
 
   integration:
     name: Integration tests

@@ -48,8 +48,13 @@
 #include <filesystem>
 #include <iostream>
 
-#include <dlfcn.h>   // dlsym — for runtime ScriptInstance::L resolution
-#include <unistd.h>  // getpid — for default nick generation
+#ifdef _WIN32
+#include <process.h>   // _getpid
+#include <windows.h>   // GetModuleHandle, GetProcAddress
+#else
+#include <dlfcn.h>     // dlsym — for runtime ScriptInstance::L resolution
+#include <unistd.h>    // getpid — for default nick generation
+#endif
 
 // We do NOT #include <lua.hpp> here.  The installed Lua dev headers may be
 // a different version (e.g. 5.3 or 5.4) from the Lua library that
@@ -104,7 +109,9 @@ static lua_settop_t      s_lua_settop = nullptr;
 // Resolve the protected static dcpp::ScriptInstance::L pointer via dlsym.
 // We can't #include ScriptManager.h and access it directly because L is
 // protected.  The mangled name is stable across GCC/Clang (Itanium ABI).
-#ifdef LUA_SCRIPT
+// On Windows (MSVC mangling), runtime symbol resolution of a protected
+// static across library boundaries is not feasible, so we skip it.
+#if defined(LUA_SCRIPT) && !defined(_WIN32)
 static lua_State** resolveLuaStatePtr() {
     void* sym = dlsym(RTLD_DEFAULT, "_ZN4dcpp14ScriptInstance1LE");
     return reinterpret_cast<lua_State**>(sym);
@@ -112,7 +119,7 @@ static lua_State** resolveLuaStatePtr() {
 #endif
 
 static void initLuaScriptingIfPresent() {
-#ifdef LUA_SCRIPT
+#if defined(LUA_SCRIPT) && !defined(_WIN32)
     lua_State** lua_state_ptr = resolveLuaStatePtr();
     if (!lua_state_ptr)
         return;   // Not compiled with Lua — nothing to do
@@ -154,7 +161,7 @@ static void initLuaScriptingIfPresent() {
     fn_openlibs(L);
 
     *lua_state_ptr = L;
-#endif
+#endif  // defined(LUA_SCRIPT) && !defined(_WIN32)
 }
 
 // =========================================================================
@@ -257,7 +264,11 @@ bool DCBridge::initialize(const std::string& configDir) {
         std::string currentNick = sm->get(SettingsManager::NICK, true);
         if (currentNick.empty()) {
             // Generate a default nick: "dcpy-<pid>"
+#ifdef _WIN32
+            std::string defaultNick = "dcpy-" + std::to_string(_getpid());
+#else
             std::string defaultNick = "dcpy-" + std::to_string(getpid());
+#endif
             sm->set(SettingsManager::NICK, defaultNick);
         }
     }
