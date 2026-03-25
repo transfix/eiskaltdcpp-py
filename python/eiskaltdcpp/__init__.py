@@ -11,7 +11,7 @@
 try:
     from eiskaltdcpp._version import __version__
 except ImportError:
-    __version__ = "2.4.2"
+    __version__ = "2.5.0.0"
 
 # Exception hierarchy — always importable (pure Python)
 from eiskaltdcpp.exceptions import (  # noqa: F401

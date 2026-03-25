@@ -40,8 +40,12 @@
 // dcpp/version.h pulls in VersionGlobal.h which is a build-time generated
 // file not installed by libeiskaltdcpp-dev.  We only need DCVERSIONSTRING.
 #ifndef DCVERSIONSTRING
-#define DCVERSIONSTRING "2.4.2"
+#define DCVERSIONSTRING "2.5.0"
 #endif
+
+// eispy client tag shown in NMDC $MyINFO (e.g. <eispy V:2.5.0,M:A,H:…>)
+static const std::string eispyNMDCTag = "eispy V:" DCVERSIONSTRING;
+static const std::string eispyADCTag  = "eispy " DCVERSIONSTRING;
 
 #include <algorithm>
 #include <cstdlib>
@@ -50,10 +54,11 @@
 
 #ifdef _WIN32
 #include <process.h>   // _getpid
-#include <windows.h>   // GetModuleHandle, GetProcAddress
+#include <windows.h>   // GetModuleHandle, GetProcAddress, GetUserName, etc.
 #else
 #include <dlfcn.h>     // dlsym — for runtime ScriptInstance::L resolution
-#include <unistd.h>    // getpid — for default nick generation
+#include <pwd.h>       // getpwuid — for username resolution
+#include <unistd.h>    // getpid, gethostname
 #endif
 
 // We do NOT #include <lua.hpp> here.  The installed Lua dev headers may be
@@ -263,13 +268,42 @@ bool DCBridge::initialize(const std::string& configDir) {
         auto* sm = getContext()->getSettingsManager();
         std::string currentNick = sm->get(SettingsManager::NICK, true);
         if (currentNick.empty()) {
-            // Generate a default nick: "dcpy-<pid>"
 #ifdef _WIN32
-            std::string defaultNick = "dcpy-" + std::to_string(_getpid());
+            std::string defaultNick = "eispy-" + std::to_string(_getpid());
 #else
-            std::string defaultNick = "dcpy-" + std::to_string(getpid());
+            std::string defaultNick = "eispy-" + std::to_string(getpid());
 #endif
             sm->set(SettingsManager::NICK, defaultNick);
+        }
+    }
+
+    // Set a default description: <username>@<hostname>
+    {
+        auto* sm = getContext()->getSettingsManager();
+        std::string currentDesc = sm->get(SettingsManager::DESCRIPTION, true);
+        if (currentDesc.empty()) {
+            std::string user, host;
+#ifdef _WIN32
+            char nameBuf[256];
+            DWORD nameSz = sizeof(nameBuf);
+            if (GetUserNameA(nameBuf, &nameSz))
+                user = nameBuf;
+            nameSz = sizeof(nameBuf);
+            if (GetComputerNameA(nameBuf, &nameSz))
+                host = nameBuf;
+#else
+            if (auto* pw = getpwuid(getuid()))
+                user = pw->pw_name;
+            char hostBuf[256];
+            if (gethostname(hostBuf, sizeof(hostBuf)) == 0) {
+                hostBuf[sizeof(hostBuf) - 1] = '\0';
+                host = hostBuf;
+            }
+#endif
+            if (!user.empty() && !host.empty())
+                sm->set(SettingsManager::DESCRIPTION, user + "@" + host);
+            else if (!user.empty())
+                sm->set(SettingsManager::DESCRIPTION, user);
         }
     }
 
@@ -406,6 +440,17 @@ void DCBridge::connectHub(const std::string& url,
     BridgeListeners::getInstance().attach(client, this);
 
     client->connect();
+
+    // Override the client tag so NMDC $MyINFO and ADC INF advertise
+    // "eispy V:<version>" instead of the library's default "EiskaltDC++".
+    // Safe: myInfo() is only sent when the hub replies with $Hello,
+    // which happens asynchronously after connect() returns.
+    const auto& hubUrl = url;
+    if (hubUrl.compare(0, 6, "adc://") == 0 ||
+        hubUrl.compare(0, 7, "adcs://") == 0)
+        client->setClientId(eispyADCTag);
+    else
+        client->setClientId(eispyNMDCTag);
 
     {
         std::lock_guard<std::mutex> lock(m_mutex);

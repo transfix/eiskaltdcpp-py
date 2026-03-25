@@ -49,7 +49,7 @@ class MockDCClient:
 
     def __init__(self):
         self.is_initialized = True
-        self.version = "2.4.2-integ"
+        self.version = "2.5.0.0-integ"
         self._hubs: list[dict] = []
         self._users: dict[str, list[dict]] = {}
         self._chat_history: dict[str, list[str]] = {}

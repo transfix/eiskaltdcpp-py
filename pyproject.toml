@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "eiskaltdcpp-py"
-version = "2.4.2"
+version = "2.5.0.0"
 description = "Python bindings for libeiskaltdcpp — full-featured DC (Direct Connect) client"
 readme = "README.md"
 license = "GPL-3.0-or-later"

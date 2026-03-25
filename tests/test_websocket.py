@@ -49,7 +49,7 @@ class MockDCClient:
 
     def __init__(self):
         self.is_initialized = True
-        self.version = "2.4.2-test"
+        self.version = "2.5.0.0-test"
         self._hubs = []
         self._queue = []
         self._share_size = 1024

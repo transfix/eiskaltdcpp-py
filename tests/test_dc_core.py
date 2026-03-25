@@ -184,8 +184,8 @@ class TestBridgeSettings:
         """A default nick is generated when none is configured."""
         nick = bridge.getSetting("Nick")
         assert nick, "Expected a non-empty default nick"
-        assert nick.startswith("dcpy-"), \
-            f"Default nick should start with 'dcpy-', got {nick!r}"
+        assert nick.startswith("eispy-"), \
+            f"Default nick should start with 'eispy-', got {nick!r}"
 
     def test_nick_survives_set(self, bridge):
         """Nick set via setSetting is readable."""
