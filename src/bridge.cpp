@@ -316,8 +316,8 @@ bool DCBridge::initialize(const std::string& configDir) {
     getContext()->getTimerManager()->start();
 
     // Subscribe listeners to global managers
-    BridgeListeners::getInstance().setBridge(this);
-    BridgeListeners::getInstance().subscribeGlobal();
+    m_listeners = std::make_unique<BridgeListeners>(*this);
+    m_listeners->subscribeGlobal();
 
     m_initialized.store(true);
     return true;
@@ -330,9 +330,8 @@ void DCBridge::shutdown() {
 
     // Unsubscribe from global managers (safe without m_mutex —
     // these are single-threaded calls that don't touch m_hubs)
-    BridgeListeners::getInstance().unsubscribeGlobal();
-    BridgeListeners::getInstance().setBridge(nullptr);
-    BridgeListeners::getInstance().setCallback(nullptr);
+    m_listeners->unsubscribeGlobal();
+    m_listeners->setCallback(nullptr);
 
     // Collect hub clients and file lists under the lock, then release
     std::vector<Client*> clients;
@@ -398,7 +397,6 @@ void DCBridge::shutdown() {
 
     m_initialized.store(false);
 }
-
 bool DCBridge::isInitialized() const {
     return m_initialized.load();
 }
@@ -410,7 +408,8 @@ bool DCBridge::isInitialized() const {
 void DCBridge::setCallback(DCClientCallback* cb) {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_callback = cb;
-    BridgeListeners::getInstance().setCallback(cb);
+    if (m_listeners)
+        m_listeners->setCallback(cb);
 }
 
 // =========================================================================
@@ -437,7 +436,7 @@ void DCBridge::connectHub(const std::string& url,
     }
 
     // Register ourselves as listener (via the BridgeListeners helper)
-    BridgeListeners::getInstance().attach(client, this);
+    m_listeners->attach(client);
 
     client->connect();
 
@@ -475,7 +474,7 @@ void DCBridge::disconnectHub(const std::string& url) {
 
     // m_mutex released — safe to call into dcpp (avoids ABBA deadlock)
     if (client) {
-        BridgeListeners::getInstance().detach(client);
+        m_listeners->detach(client);
         client->disconnect(true);
         getContext()->getClientManager()->putClient(client);
     }

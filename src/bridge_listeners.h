@@ -6,7 +6,7 @@
  *
  * The dcpp core uses a Speaker/Listener observer pattern: managers inherit
  * Speaker<XyzListener> and fire events via tagged overloads of on().
- * This file provides a singleton BridgeListeners that subscribes to all
+ * This file provides BridgeListeners, owned by DCBridge, that subscribes to all
  * relevant managers and per-hub Client objects, then converts the raw dcpp
  * types into our eiskaltdcpp_py types before forwarding to the callback.
  */
@@ -119,7 +119,7 @@ inline TransferInfo infoFromUpload(const dcpp::Upload* ul) {
 }
 
 // =========================================================================
-// BridgeListeners — singleton that implements all dcpp listener protocols
+// BridgeListeners — implements all dcpp listener protocols, owned by DCBridge
 // =========================================================================
 
 class BridgeListeners :
@@ -131,17 +131,14 @@ class BridgeListeners :
         public dcpp::TimerManagerListener
 {
 public:
-    static BridgeListeners& getInstance() {
-        static BridgeListeners instance;
-        return instance;
-    }
+    explicit BridgeListeners(DCBridge& bridge)
+        : bridge_(bridge) {}
+
+    // Non-copyable
+    BridgeListeners(const BridgeListeners&) = delete;
+    BridgeListeners& operator=(const BridgeListeners&) = delete;
 
     // ----- Setup / teardown -----
-
-    void setBridge(DCBridge* bridge) {
-        std::lock_guard<std::mutex> lk(m_mutex);
-        m_bridge = bridge;
-    }
 
     void setCallback(DCClientCallback* cb) {
         std::lock_guard<std::mutex> lk(m_mutex);
@@ -167,9 +164,7 @@ public:
     }
 
     /// Attach to a specific hub client
-    void attach(dcpp::Client* client, DCBridge* bridge) {
-        std::lock_guard<std::mutex> lk(m_mutex);
-        m_bridge = bridge;
+    void attach(dcpp::Client* client) {
         client->addListener(this);
     }
 
@@ -433,7 +428,7 @@ public:
     }
 
 private:
-    BridgeListeners() = default;
+    BridgeListeners() = delete;
 
     DCClientCallback* getCallback() {
         std::lock_guard<std::mutex> lk(m_mutex);
@@ -466,7 +461,7 @@ private:
     void markHubDisconnected(const std::string& hubUrl);
 
     std::mutex m_mutex;
-    DCBridge* m_bridge = nullptr;
+    DCBridge& bridge_;
     DCClientCallback* m_callback = nullptr;
 };
 

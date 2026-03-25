@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <atomic>
 #include <deque>
@@ -34,6 +35,11 @@ namespace dcpp {
 class Client;
 class SearchResult;
 class DirectoryListing;
+}
+
+// Forward declare the listener multiplexer (defined in bridge_listeners.h)
+namespace eiskaltdcpp_py {
+class BridgeListeners;
 }
 
 namespace eiskaltdcpp_py {
@@ -380,6 +386,9 @@ private:
 
     // Hub tracking (url → data)
     std::unordered_map<std::string, HubData> m_hubs;
+
+    // Listener multiplexer (bridges dcpp callbacks to Python)
+    std::unique_ptr<BridgeListeners> m_listeners;
 
     // File list tracking
     std::unordered_map<std::string, dcpp::DirectoryListing*> m_fileLists;
