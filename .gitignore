@@ -35,3 +35,4 @@ dist/
 .DS_Store
 Thumbs.db
 .venv/
+FULL_SWIG_WRAP_PLAN.md

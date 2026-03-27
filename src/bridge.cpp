@@ -329,6 +329,18 @@ void DCBridge::shutdown() {
         return;
     }
 
+    // Detach per-hub listeners FIRST so socket-thread callbacks
+    // (e.g. refreshHubCache reading cipherName) cannot fire on
+    // clients we are about to disconnect and return to the pool.
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (auto& [url, data] : m_hubs) {
+            if (data.client) {
+                m_listeners->detach(data.client);
+            }
+        }
+    }
+
     // Unsubscribe from global managers (safe without m_mutex —
     // these are single-threaded calls that don't touch m_hubs)
     m_listeners->unsubscribeGlobal();
@@ -744,7 +756,7 @@ bool DCBridge::addMagnet(const std::string& magnetLink,
     if (name.empty()) name = tth;
 
     std::string dir = downloadDir.empty()
-        ? SETTING(DOWNLOAD_DIRECTORY)
+        ? m_context->getSettingsManager()->get(SettingsManager::DOWNLOAD_DIRECTORY, true)
         : downloadDir;
 
     return addToQueue(dir, name, size, tth);
@@ -878,7 +890,7 @@ bool DCBridge::openFileList(const std::string& fileListId) {
 
     // Resolve the User from the CID embedded in the filename.
     // File list names follow: [nick].[CID-base32].xml.bz2
-    UserPtr user = DirectoryListing::getUserFromFilename(fileListId);
+    UserPtr user = DirectoryListing::getUserFromFilename(*m_context, fileListId);
     if (!user) {
         fprintf(stderr, "DCBridge::openFileList: could not resolve user "
                         "from filename '%s'\n", fileListId.c_str());
@@ -893,7 +905,7 @@ bool DCBridge::openFileList(const std::string& fileListId) {
     }
 
     try {
-        auto* listing = new DirectoryListing(HintedUser(user, hubHint));
+        auto* listing = new DirectoryListing(*m_context, HintedUser(user, hubHint));
         listing->loadFile(path);
         m_fileLists[fileListId] = listing;
         return true;
@@ -1025,7 +1037,7 @@ bool DCBridge::downloadFileFromList(const std::string& fileListId,
 
         // Build download target path
         target = downloadTo.empty()
-            ? SETTING(DOWNLOAD_DIRECTORY)
+            ? m_context->getSettingsManager()->get(SettingsManager::DOWNLOAD_DIRECTORY, true)
             : downloadTo;
         if (!target.empty() && target.back() == PATH_SEPARATOR)
             target += fname;
@@ -1084,7 +1096,7 @@ bool DCBridge::downloadDirFromList(const std::string& fileListId,
     }
 
     std::string target = downloadTo.empty()
-        ? SETTING(DOWNLOAD_DIRECTORY)
+        ? m_context->getSettingsManager()->get(SettingsManager::DOWNLOAD_DIRECTORY, true)
         : downloadTo;
 
     try {
@@ -1200,8 +1212,8 @@ TransferStats DCBridge::getTransferStats() {
 
     stats.downloadSpeed = getContext()->getDownloadManager()->getRunningAverage();
     stats.uploadSpeed = getContext()->getUploadManager()->getRunningAverage();
-    stats.totalDownloaded = SETTING(TOTAL_DOWNLOAD);
-    stats.totalUploaded = SETTING(TOTAL_UPLOAD);
+    stats.totalDownloaded = m_context->getSettingsManager()->get(SettingsManager::TOTAL_DOWNLOAD, true);
+    stats.totalUploaded = m_context->getSettingsManager()->get(SettingsManager::TOTAL_UPLOAD, true);
     stats.downloadCount = getContext()->getDownloadManager()->getDownloadCount();
     stats.uploadCount = getContext()->getUploadManager()->getUploadCount();
     return stats;
