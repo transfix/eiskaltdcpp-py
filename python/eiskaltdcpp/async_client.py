@@ -122,6 +122,90 @@ class AsyncDCClient:
     def version(self) -> str:
         return self._sync_client.version
 
+    # ------------------------------------------------------------------
+    # Direct manager access (Phase 2 — delegates to sync client)
+    # ------------------------------------------------------------------
+
+    @property
+    def settings(self):
+        """Direct access to SettingsManager."""
+        return self._sync_client.settings
+
+    @property
+    def clients(self):
+        """Direct access to ClientManager."""
+        return self._sync_client.clients
+
+    @property
+    def queue(self):
+        """Direct access to QueueManager."""
+        return self._sync_client.queue
+
+    @property
+    def shares(self):
+        """Direct access to ShareManager."""
+        return self._sync_client.shares
+
+    @property
+    def search_manager(self):
+        """Direct access to SearchManager."""
+        return self._sync_client.search_manager
+
+    @property
+    def downloads(self):
+        """Direct access to DownloadManager."""
+        return self._sync_client.downloads
+
+    @property
+    def uploads(self):
+        """Direct access to UploadManager."""
+        return self._sync_client.uploads
+
+    @property
+    def favorites(self):
+        """Direct access to FavoriteManager."""
+        return self._sync_client.favorites
+
+    @property
+    def finished(self):
+        """Direct access to FinishedManager."""
+        return self._sync_client.finished
+
+    @property
+    def hashing(self):
+        """Direct access to HashManager."""
+        return self._sync_client.hashing
+
+    @property
+    def throttle(self):
+        """Direct access to ThrottleManager."""
+        return self._sync_client.throttle
+
+    @property
+    def connectivity(self):
+        """Direct access to ConnectivityManager."""
+        return self._sync_client.connectivity
+
+    @property
+    def crypto(self):
+        """Direct access to CryptoManager."""
+        return self._sync_client.crypto
+
+    @property
+    def logs(self):
+        """Direct access to LogManager."""
+        return self._sync_client.logs
+
+    @property
+    def ip_filter(self):
+        """Direct access to IPFilter."""
+        return self._sync_client.ip_filter
+
+    @property
+    def adl_search(self):
+        """Direct access to ADLSearchManager."""
+        return self._sync_client.adl_search
+
     async def __aenter__(self) -> "AsyncDCClient":
         await self.initialize()
         return self

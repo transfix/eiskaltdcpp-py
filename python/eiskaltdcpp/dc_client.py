@@ -275,6 +275,90 @@ class DCClient:
         return dc_core.DCBridge.getVersion()
 
     # ------------------------------------------------------------------
+    # Direct manager access (Phase 2 — via DCBridge.context)
+    # ------------------------------------------------------------------
+
+    @property
+    def settings(self):
+        """Direct access to SettingsManager."""
+        return self._bridge.settings_manager
+
+    @property
+    def clients(self):
+        """Direct access to ClientManager."""
+        return self._bridge.client_manager
+
+    @property
+    def queue(self):
+        """Direct access to QueueManager."""
+        return self._bridge.queue_manager
+
+    @property
+    def shares(self):
+        """Direct access to ShareManager."""
+        return self._bridge.share_manager
+
+    @property
+    def search_manager(self):
+        """Direct access to SearchManager."""
+        return self._bridge.search_manager
+
+    @property
+    def downloads(self):
+        """Direct access to DownloadManager."""
+        return self._bridge.download_manager
+
+    @property
+    def uploads(self):
+        """Direct access to UploadManager."""
+        return self._bridge.upload_manager
+
+    @property
+    def favorites(self):
+        """Direct access to FavoriteManager."""
+        return self._bridge.favorite_manager
+
+    @property
+    def finished(self):
+        """Direct access to FinishedManager."""
+        return self._bridge.finished_manager
+
+    @property
+    def hashing(self):
+        """Direct access to HashManager."""
+        return self._bridge.hash_manager
+
+    @property
+    def throttle(self):
+        """Direct access to ThrottleManager."""
+        return self._bridge.throttle_manager
+
+    @property
+    def connectivity(self):
+        """Direct access to ConnectivityManager."""
+        return self._bridge.connectivity_manager
+
+    @property
+    def crypto(self):
+        """Direct access to CryptoManager."""
+        return self._bridge.crypto_manager
+
+    @property
+    def logs(self):
+        """Direct access to LogManager."""
+        return self._bridge.log_manager
+
+    @property
+    def ip_filter(self):
+        """Direct access to IPFilter."""
+        return self._bridge.ip_filter
+
+    @property
+    def adl_search(self):
+        """Direct access to ADLSearchManager."""
+        return self._bridge.adl_search_manager
+
+    # ------------------------------------------------------------------
     # Event registration
     # ------------------------------------------------------------------
 

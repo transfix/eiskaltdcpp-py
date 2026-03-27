@@ -97,8 +97,8 @@ namespace std {
 // Core types must come first (CID, TTHValue, UserPtr, HintedUser, etc.)
 %include "dcpp_types.i"
 
-// DCContext — the application context that owns all managers
-%include "dcpp_context.i"
+// ContextAware base class — needed by all manager classes
+%include "dcpp_context_base.i"
 
 // Managers — ordered by dependency
 %include "dcpp_settings.i"
@@ -118,6 +118,9 @@ namespace std {
 %include "dcpp_ipfilter.i"
 %include "dcpp_adl_search.i"
 %include "dcpp_debug_manager.i"
+
+// DCContext — full class with typed manager accessors (AFTER all managers)
+%include "dcpp_context.i"
 
 // EisPyContext — DCBridge extensions for direct manager access
 %include "eispy_context.i"

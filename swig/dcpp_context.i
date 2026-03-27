@@ -1,9 +1,13 @@
 /*
- * dcpp_context.i — DCContext + startup/getContext/setContext
+ * dcpp_context.i — DCContext class + startup/getContext/setContext
  *
  * Wraps the application context that owns all core manager instances.
  * Manager accessor methods return non-owning raw pointers — SWIG must
  * NOT take ownership (no %newobject on getters).
+ *
+ * IMPORTANT: This file must be included AFTER all manager .i files
+ * so that SWIG can properly type the returned pointers. ContextAware
+ * (needed by managers) is in dcpp_context_base.i which comes first.
  */
 
 %{
@@ -28,44 +32,8 @@
 #include <dcpp/ADLSearch.h>
 #include <dcpp/DebugManager.h>
 #include <dcpp/ResourceManager.h>
-
-using dcpp::DCContext;
+#include "extra/ipfilter.h"
 %}
-
-// ============================================================================
-// Forward declarations for managers returned by DCContext
-// ============================================================================
-
-namespace dcpp {
-    class TimerManager;
-    class ResourceManager;
-}
-
-// ============================================================================
-// ContextAware — mixin base with ctx() accessor
-// ============================================================================
-
-%nodefaultctor dcpp::ContextAware;
-%nodefaultdtor dcpp::ContextAware;
-
-namespace dcpp {
-
-class ContextAware {
-public:
-    DCContext& ctx() const noexcept;
-protected:
-    // Constructor not exposed — base class only
-};
-
-}  // namespace dcpp
-
-// Managers not exposed in detail — just forward-declared for getter returns
-%nodefaultctor dcpp::TimerManager;
-%nodefaultctor dcpp::ResourceManager;
-namespace dcpp {
-    class TimerManager {};
-    class ResourceManager {};
-}
 
 // ============================================================================
 // DCContext — application context owning all managers
@@ -109,6 +77,13 @@ public:
 };
 
 }  // namespace dcpp
+
+// IPFilter is in global namespace — expose via %extend
+%extend dcpp::DCContext {
+    ::IPFilter* getIPFilter() {
+        return $self->getIPFilter();
+    }
+}
 
 %extend dcpp::DCContext {
     std::string __str__() {
