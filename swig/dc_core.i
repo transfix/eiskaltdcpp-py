@@ -67,6 +67,7 @@
 // ============================================================================
 
 %{
+#include <dcpp/stdinc.h>
 #include "types.h"
 #include "callbacks.h"
 #include "bridge.h"
@@ -75,7 +76,7 @@ using namespace eiskaltdcpp_py;
 %}
 
 // ============================================================================
-// Standard library template instantiations
+// Standard library template instantiations (bridge types)
 // ============================================================================
 
 namespace std {
@@ -88,6 +89,38 @@ namespace std {
     %template(FileListEntryVector)  vector<eiskaltdcpp_py::FileListEntry>;
     %template(TransferInfoVector)   vector<eiskaltdcpp_py::TransferInfo>;
 }
+
+// ============================================================================
+// Direct dcpp manager wrapping — modular .i files
+// ============================================================================
+
+// Core types must come first (CID, TTHValue, UserPtr, HintedUser, etc.)
+%include "dcpp_types.i"
+
+// DCContext — the application context that owns all managers
+%include "dcpp_context.i"
+
+// Managers — ordered by dependency
+%include "dcpp_settings.i"
+%include "dcpp_client_manager.i"
+%include "dcpp_search_manager.i"
+%include "dcpp_queue_manager.i"
+%include "dcpp_share_manager.i"
+%include "dcpp_hash_manager.i"
+%include "dcpp_download_manager.i"
+%include "dcpp_upload_manager.i"
+%include "dcpp_throttle_manager.i"
+%include "dcpp_favorite_manager.i"
+%include "dcpp_log_manager.i"
+%include "dcpp_finished_manager.i"
+%include "dcpp_crypto_manager.i"
+%include "dcpp_connectivity.i"
+%include "dcpp_ipfilter.i"
+%include "dcpp_adl_search.i"
+%include "dcpp_debug_manager.i"
+
+// EisPyContext — DCBridge extensions for direct manager access
+%include "eispy_context.i"
 
 // ============================================================================
 // DCClientCallback — Director class for Python callbacks
