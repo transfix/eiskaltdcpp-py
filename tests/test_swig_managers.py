@@ -320,14 +320,14 @@ class TestSettingsManagerEnums:
 # ============================================================================
 
 class TestBridgeManagerProperties:
-    """Test direct manager access via DCBridge properties."""
+    """Test direct manager access via EisPyContext properties."""
 
     @pytest.fixture(autouse=True, scope="class")
     def bridge(self, tmp_path_factory):
         cfg = tmp_path_factory.mktemp("dc-manager-tests")
-        b = dc_core.DCBridge()
+        b = dc_core.EisPyContext()
         ok = b.initialize(str(cfg) + "/")
-        assert ok, "Bridge initialization failed"
+        assert ok, "Context initialization failed"
         yield b
         b.shutdown()
 

@@ -1,38 +1,31 @@
 /*
- * eispy_context.i — EisPyContext wrapping (thin lifecycle wrapper)
+ * eispy_context.i — EisPyContext extensions for direct manager access
  *
- * EisPyContext replaces DCBridge for new code — it handles:
+ * EisPyContext is the main Python-facing class — it handles:
  *   - Startup/shutdown sequencing
  *   - Listener multiplexing (BridgeListeners)
  *   - Hub cache (ABBA-deadlock-safe snapshots)
  *   - Chat/search result caches
  *   - Lua scripting bridge
  *
- * For Phase 1, EisPyContext IS DCBridge — we expose it under both names.
- * The existing DCBridge class continues to work alongside the new
- * direct manager access. In Phase 3, DCBridge will be removed.
- *
- * This file adds Python-friendly property access to DCBridge's
+ * This file adds Python-friendly property access to EisPyContext's
  * underlying DCContext, giving Python direct manager access while
  * keeping the orchestration/cache layer intact.
  */
 
-// No new C++ code needed for Phase 1 — DCBridge already owns DCContext.
+// No new C++ code needed — EisPyContext already owns DCContext.
 // We just need to expose the context pointer through SWIG.
 
 %{
-#include "bridge.h"
-using eiskaltdcpp_py::DCBridge;
+#include "eispy_context.h"
+using eiskaltdcpp_py::EisPyContext;
 %}
 
-// Extend DCBridge with a context accessor for direct manager access
-%extend eiskaltdcpp_py::DCBridge {
+// Extend EisPyContext with a context accessor for direct manager access
+%extend eiskaltdcpp_py::EisPyContext {
     // Return the raw DCContext* for direct manager access
     dcpp::DCContext* getContext() {
-        // DCBridge owns a unique_ptr<DCContext> m_context
-        // We access it through a public method we'll need to add,
-        // or we use the fact that DCBridge already has the context
-        // For now, we expose it via the module-level getContext()
+        // EisPyContext owns a unique_ptr<DCContext> m_context
         return dcpp::getContext();
     }
 
@@ -42,9 +35,9 @@ using eiskaltdcpp_py::DCBridge;
         """Access the underlying DCContext for direct manager calls.
 
         Example:
-            bridge = dc_core.DCBridge()
-            bridge.initialize('/tmp/config')
-            settings = bridge.context.getSettingsManager()
+            ctx = dc_core.EisPyContext()
+            ctx.initialize('/tmp/config')
+            settings = ctx.context.getSettingsManager()
             nick = settings.get(dc_core.SettingsManager.NICK)
         """
         return self.getContext()

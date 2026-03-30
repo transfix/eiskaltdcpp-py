@@ -4,7 +4,7 @@
  */
 
 #include "bridge_listeners.h"
-#include "bridge.h"
+#include "eispy_context.h"
 
 namespace eiskaltdcpp_py {
 

@@ -6,7 +6,7 @@
  *
  * The dcpp core uses a Speaker/Listener observer pattern: managers inherit
  * Speaker<XyzListener> and fire events via tagged overloads of on().
- * This file provides BridgeListeners, owned by DCBridge, that subscribes to all
+ * This file provides BridgeListeners, owned by EisPyContext, that subscribes to all
  * relevant managers and per-hub Client objects, then converts the raw dcpp
  * types into our eiskaltdcpp_py types before forwarding to the callback.
  */
@@ -47,7 +47,7 @@
 
 // Forward declare
 namespace eiskaltdcpp_py {
-class DCBridge;
+class EisPyContext;
 }
 
 namespace eiskaltdcpp_py {
@@ -131,7 +131,7 @@ class BridgeListeners :
         public dcpp::TimerManagerListener
 {
 public:
-    explicit BridgeListeners(DCBridge& bridge)
+    explicit BridgeListeners(EisPyContext& bridge)
         : bridge_(bridge) {}
 
     // Non-copyable
@@ -461,7 +461,7 @@ private:
     void markHubDisconnected(const std::string& hubUrl);
 
     std::mutex m_mutex;
-    DCBridge& bridge_;
+    EisPyContext& bridge_;
     DCClientCallback* m_callback = nullptr;
 };
 

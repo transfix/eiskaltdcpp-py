@@ -1,7 +1,7 @@
 """
 High-level Python wrapper for the eiskaltdcpp DC client core.
 
-This module provides a Pythonic interface to the C++ DCBridge via SWIG bindings,
+This module provides a Pythonic interface to the C++ EisPyContext via SWIG bindings,
 following the same pattern as verlihub's core.py wrapper.
 
 Usage:
@@ -243,7 +243,7 @@ class DCClient:
     """
 
     def __init__(self, config_dir: str | Path = "") -> None:
-        self._bridge = dc_core.DCBridge()
+        self._bridge = dc_core.EisPyContext()
         self._router = _CallbackRouter()
         self._config_dir = str(config_dir) if config_dir else ""
         self._initialized = False
@@ -272,7 +272,7 @@ class DCClient:
     @property
     def version(self) -> str:
         """Get libeiskaltdcpp version string."""
-        return dc_core.DCBridge.getVersion()
+        return dc_core.EisPyContext.getVersion()
 
     # ------------------------------------------------------------------
     # Direct manager access (Phase 2 — via DCBridge.context)
@@ -500,15 +500,15 @@ class DCClient:
 
     def remove_download(self, target: str) -> None:
         """Remove an item from the download queue."""
-        self._bridge.removeFromQueue(target)
+        self.queue.remove(target)
 
     def move_download(self, source: str, target: str) -> None:
         """Move a queued download to a new location."""
-        self._bridge.moveQueueItem(source, target)
+        self.queue.move(source, target)
 
     def set_priority(self, target: str, priority: int) -> None:
         """Set download priority (0=paused, 1=lowest..5=highest)."""
-        self._bridge.setPriority(target, priority)
+        self.queue.setPriority(target, priority)
 
     def list_queue(self) -> list:
         """List all items in the download queue."""
@@ -582,63 +582,107 @@ class DCClient:
 
     def remove_share(self, real_path: str) -> bool:
         """Remove a directory from share."""
-        return self._bridge.removeShareDir(real_path)
+        try:
+            self.shares.removeDirectory(real_path)
+            return True
+        except Exception:
+            return False
 
     def rename_share(self, real_path: str, new_name: str) -> bool:
         """Rename a shared directory's virtual name."""
-        return self._bridge.renameShareDir(real_path, new_name)
+        try:
+            self.shares.renameDirectory(real_path, new_name)
+            return True
+        except Exception:
+            return False
 
     def list_shares(self) -> list:
         """List all shared directories."""
-        return list(self._bridge.listShare())
+        return list(self.shares.getDirectories())
 
     def refresh_share(self) -> None:
         """Refresh shared file lists."""
-        self._bridge.refreshShare()
+        self.shares.setDirty()
+        self.shares.refresh(True, True, False)
 
     @property
     def share_size(self) -> int:
         """Total share size in bytes."""
-        return self._bridge.getShareSize()
+        return self.shares.getShareSize()
 
     @property
     def shared_files(self) -> int:
         """Total number of shared files."""
-        return self._bridge.getSharedFileCount()
+        return self.shares.getSharedFiles()
 
     # ------------------------------------------------------------------
     # Transfers
     # ------------------------------------------------------------------
 
     @property
-    def transfer_stats(self) -> Any:
+    def transfer_stats(self) -> dict:
         """Get aggregate transfer statistics."""
-        return self._bridge.getTransferStats()
+        dl = self.downloads
+        ul = self.uploads
+        return {
+            "download_count": dl.getDownloadCount() if dl else 0,
+            "upload_count": ul.getUploadCount() if ul else 0,
+        }
 
     # ------------------------------------------------------------------
     # Hashing
     # ------------------------------------------------------------------
 
     @property
-    def hash_status(self) -> Any:
+    def hash_status(self) -> dict:
         """Get file hashing status."""
-        return self._bridge.getHashStatus()
+        hm = self.hashing
+        if not hm:
+            return {"current_file": "", "bytes_left": 0, "files_left": 0}
+        try:
+            stats = hm.stats()
+            return {
+                "current_file": stats[0],
+                "bytes_left": stats[1],
+                "files_left": stats[2],
+            }
+        except Exception:
+            return {"current_file": "", "bytes_left": 0, "files_left": 0}
 
     def pause_hashing(self, pause: bool = True) -> None:
         """Pause or resume file hashing."""
-        self._bridge.pauseHashing(pause)
+        if pause:
+            self.hashing.pauseHashing()
+        else:
+            self.hashing.resumeHashing()
 
     # ------------------------------------------------------------------
     # Settings
     # ------------------------------------------------------------------
 
     def get_setting(self, name: str) -> str:
-        """Get a DC client setting by name."""
-        return self._bridge.getSetting(name)
+        """Get a DC client setting by name.
+
+        Args:
+            name: Setting name (e.g. 'NICK', 'DOWNLOAD_DIRECTORY')
+        """
+        sm = self.settings
+        if not sm:
+            return ""
+        attr = getattr(dc_core.SettingsManager, name, None)
+        if attr is None:
+            return ""
+        return str(sm.get(attr))
 
     def set_setting(self, name: str, value: str) -> None:
         """Set a DC client setting."""
-        self._bridge.setSetting(name, value)
+        sm = self.settings
+        if not sm:
+            return
+        attr = getattr(dc_core.SettingsManager, name, None)
+        if attr is None:
+            return
+        sm.set(attr, value)
 
     def start_networking(self) -> None:
         """(Re)start the networking stack (connection listeners).
@@ -650,7 +694,9 @@ class DCClient:
 
     def reload_config(self) -> None:
         """Reload configuration from disk."""
-        self._bridge.reloadConfig()
+        sm = self.settings
+        if sm:
+            sm.load()
 
     # ------------------------------------------------------------------
     # Lua scripting

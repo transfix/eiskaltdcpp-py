@@ -70,7 +70,7 @@
 #include <dcpp/stdinc.h>
 #include "types.h"
 #include "callbacks.h"
-#include "bridge.h"
+#include "eispy_context.h"
 
 using namespace eiskaltdcpp_py;
 %}
@@ -122,7 +122,7 @@ namespace std {
 // DCContext — full class with typed manager accessors (AFTER all managers)
 %include "dcpp_context.i"
 
-// EisPyContext — DCBridge extensions for direct manager access
+// EisPyContext — extensions for direct manager access
 %include "eispy_context.i"
 
 // ============================================================================
@@ -248,14 +248,14 @@ namespace std {
 }
 
 // ============================================================================
-// DCBridge — Main API class
+// EisPyContext — Main API class
 // ============================================================================
 
-%feature("docstring") eiskaltdcpp_py::DCBridge "
-Main bridge class providing access to the eiskaltdcpp DC client core.
+%feature("docstring") eiskaltdcpp_py::EisPyContext "
+Main context class providing access to the eiskaltdcpp DC client core.
 
 Lifecycle:
-    1. Construct a DCBridge instance
+    1. Construct an EisPyContext instance
     2. Call initialize(config_dir) to start the core
     3. Call setCallback(handler) to receive events
     4. Use connectHub(), search(), addToQueue(), etc.
@@ -265,23 +265,28 @@ Thread safety:
     All methods are thread-safe. The DC core runs its own threads internally.
     Callback dispatch to Python acquires the GIL automatically via SWIG directors.
 
+Direct manager access:
+    After initialize(), use .context to access the underlying DCContext
+    and its typed manager accessors (settings_manager, queue_manager, etc.)
+    for operations not wrapped by EisPyContext itself.
+
 Example:
-    bridge = dc_core.DCBridge()
-    bridge.initialize('/tmp/dc-config')
+    ctx = dc_core.EisPyContext()
+    ctx.initialize('/tmp/dc-config')
 
     class MyHandler(dc_core.DCClientCallback):
         def onChatMessage(self, hub_url, nick, message):
             print(f'<{nick}> {message}')
 
     handler = MyHandler()
-    bridge.setCallback(handler)
-    bridge.connectHub('dchub://example.com:411')
+    ctx.setCallback(handler)
+    ctx.connectHub('dchub://example.com:411')
 ";
 
 // Ignore internal/private members
-%ignore eiskaltdcpp_py::DCBridge::HubData;
-%ignore eiskaltdcpp_py::DCBridge::findHub;
-%ignore eiskaltdcpp_py::DCBridge::findClient;
+%ignore eiskaltdcpp_py::EisPyContext::HubData;
+%ignore eiskaltdcpp_py::EisPyContext::findHub;
+%ignore eiskaltdcpp_py::EisPyContext::findClient;
 
 // ============================================================================
 // Include the headers to generate wrappers
@@ -296,27 +301,27 @@ Example:
 
 %include "types.h"
 %include "callbacks.h"
-%include "bridge.h"
+%include "eispy_context.h"
 
 // ============================================================================
-// Python-friendly extensions to DCBridge
+// Python-friendly extensions to EisPyContext
 // ============================================================================
 
-%extend eiskaltdcpp_py::DCBridge {
+%extend eiskaltdcpp_py::EisPyContext {
     /*
      * Python context manager support (with statement).
      *
      * Example:
-     *   bridge = dc_core.DCBridge()
-     *   bridge.initialize('/tmp/config')
-     *   with bridge:
-     *       bridge.connectHub('dchub://example.com')
+     *   ctx = dc_core.EisPyContext()
+     *   ctx.initialize('/tmp/config')
+     *   with ctx:
+     *       ctx.connectHub('dchub://example.com')
      *       # ... use the client ...
      *   # shutdown() called automatically
      */
     PyObject* __enter__() {
         Py_INCREF($self);
-        return SWIG_NewPointerObj($self, SWIGTYPE_p_eiskaltdcpp_py__DCBridge, 0);
+        return SWIG_NewPointerObj($self, SWIGTYPE_p_eiskaltdcpp_py__EisPyContext, 0);
     }
 
     void __exit__(PyObject* exc_type, PyObject* exc_val, PyObject* exc_tb) {
@@ -334,31 +339,16 @@ Example:
     @property
     def version(self):
         """Get libeiskaltdcpp version string."""
-        return DCBridge.getVersion()
+        return EisPyContext.getVersion()
 
     @property
     def hubs(self):
         """List of currently connected/configured hubs."""
         return self.listHubs()
-
-    @property
-    def share_size(self):
-        """Total share size in bytes."""
-        return self.getShareSize()
-
-    @property
-    def shared_files(self):
-        """Total number of shared files."""
-        return self.getSharedFileCount()
-
-    @property
-    def transfer_stats(self):
-        """Current transfer statistics."""
-        return self.getTransferStats()
-
-    @property
-    def hash_status(self):
-        """Current file hashing status."""
-        return self.getHashStatus()
     %}
 }
+
+// Backward compatibility alias — Python code using dc_core.DCBridge still works
+%pythoncode %{
+DCBridge = EisPyContext
+%}

@@ -6,12 +6,12 @@
 #
 
 set(BRIDGE_SOURCES
-    bridge.cpp
+    eispy_context.cpp
     bridge_listeners.cpp
 )
 
 set(BRIDGE_HEADERS
-    bridge.h
+    eispy_context.h
     bridge_listeners.h
     callbacks.h
     dcpp_compat.h
