@@ -70,6 +70,7 @@
 #include <dcpp/stdinc.h>
 #include "types.h"
 #include "callbacks.h"
+#include "listener_adapters.h"
 #include "eispy_context.h"
 
 using namespace eiskaltdcpp_py;
@@ -124,6 +125,9 @@ namespace std {
 
 // EisPyContext — extensions for direct manager access
 %include "eispy_context.i"
+
+// Per-manager listener directors (Phase 4)
+%include "dcpp_listeners.i"
 
 // ============================================================================
 // DCClientCallback — Director class for Python callbacks

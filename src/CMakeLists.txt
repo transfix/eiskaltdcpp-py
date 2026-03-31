@@ -13,6 +13,7 @@ set(BRIDGE_SOURCES
 set(BRIDGE_HEADERS
     eispy_context.h
     bridge_listeners.h
+    listener_adapters.h
     callbacks.h
     dcpp_compat.h
     types.h

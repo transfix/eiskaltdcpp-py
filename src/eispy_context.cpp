@@ -13,6 +13,7 @@
 
 #include "eispy_context.h"
 #include "bridge_listeners.h"
+#include "listener_adapters.h"
 #include "callbacks.h"
 #include "dcpp_compat.h"  // must precede dcpp headers (provides STL + using decls)
 
@@ -1119,6 +1120,90 @@ EisPyContext::HubData* EisPyContext::findHub(const std::string& url) {
 dcpp::Client* EisPyContext::findClient(const std::string& url) {
     auto* hd = findHub(url);
     return hd ? hd->client : nullptr;
+}
+
+// =========================================================================
+// Per-manager listener subscription (Phase 4)
+// =========================================================================
+
+void EisPyContext::addHubListener(const std::string& hubUrl,
+                                   PyClientListener* listener) {
+    if (!listener) return;
+    std::lock_guard<std::mutex> lk(m_mutex);
+    auto* client = findClient(hubUrl);
+    if (client) {
+        client->addListener(listener);
+    }
+}
+
+void EisPyContext::removeHubListener(const std::string& hubUrl,
+                                      PyClientListener* listener) {
+    if (!listener) return;
+    std::lock_guard<std::mutex> lk(m_mutex);
+    auto* client = findClient(hubUrl);
+    if (client) {
+        client->removeListener(listener);
+    }
+}
+
+void EisPyContext::addClientManagerListener(PyClientManagerListener* listener) {
+    if (!listener || !m_initialized) return;
+    dcpp::getContext()->getClientManager()->addListener(listener);
+}
+
+void EisPyContext::removeClientManagerListener(PyClientManagerListener* listener) {
+    if (!listener || !m_initialized) return;
+    dcpp::getContext()->getClientManager()->removeListener(listener);
+}
+
+void EisPyContext::addSearchListener(PySearchManagerListener* listener) {
+    if (!listener || !m_initialized) return;
+    dcpp::getContext()->getSearchManager()->addListener(listener);
+}
+
+void EisPyContext::removeSearchListener(PySearchManagerListener* listener) {
+    if (!listener || !m_initialized) return;
+    dcpp::getContext()->getSearchManager()->removeListener(listener);
+}
+
+void EisPyContext::addQueueListener(PyQueueManagerListener* listener) {
+    if (!listener || !m_initialized) return;
+    dcpp::getContext()->getQueueManager()->addListener(listener);
+}
+
+void EisPyContext::removeQueueListener(PyQueueManagerListener* listener) {
+    if (!listener || !m_initialized) return;
+    dcpp::getContext()->getQueueManager()->removeListener(listener);
+}
+
+void EisPyContext::addDownloadListener(PyDownloadManagerListener* listener) {
+    if (!listener || !m_initialized) return;
+    dcpp::getContext()->getDownloadManager()->addListener(listener);
+}
+
+void EisPyContext::removeDownloadListener(PyDownloadManagerListener* listener) {
+    if (!listener || !m_initialized) return;
+    dcpp::getContext()->getDownloadManager()->removeListener(listener);
+}
+
+void EisPyContext::addUploadListener(PyUploadManagerListener* listener) {
+    if (!listener || !m_initialized) return;
+    dcpp::getContext()->getUploadManager()->addListener(listener);
+}
+
+void EisPyContext::removeUploadListener(PyUploadManagerListener* listener) {
+    if (!listener || !m_initialized) return;
+    dcpp::getContext()->getUploadManager()->removeListener(listener);
+}
+
+void EisPyContext::addTimerListener(PyTimerManagerListener* listener) {
+    if (!listener || !m_initialized) return;
+    dcpp::getContext()->getTimerManager()->addListener(listener);
+}
+
+void EisPyContext::removeTimerListener(PyTimerManagerListener* listener) {
+    if (!listener || !m_initialized) return;
+    dcpp::getContext()->getTimerManager()->removeListener(listener);
 }
 
 } // namespace eiskaltdcpp_py

@@ -46,6 +46,17 @@ namespace eiskaltdcpp_py {
 class BridgeListeners;
 }
 
+// Forward declare listener adapter classes (defined in listener_adapters.h)
+namespace eiskaltdcpp_py {
+class PyClientListener;
+class PyClientManagerListener;
+class PySearchManagerListener;
+class PyQueueManagerListener;
+class PyDownloadManagerListener;
+class PyUploadManagerListener;
+class PyTimerManagerListener;
+}
+
 namespace eiskaltdcpp_py {
 
 // =====================================================================
@@ -238,6 +249,38 @@ public:
     // =====================================================================
 
     static std::string getVersion();
+
+    // =====================================================================
+    // Per-manager listener subscription (Phase 4 — SWIG directors)
+    // =====================================================================
+
+    /// Attach a per-hub listener (ClientListener events for one hub).
+    void addHubListener(const std::string& hubUrl, PyClientListener* listener);
+    void removeHubListener(const std::string& hubUrl, PyClientListener* listener);
+
+    /// Global ClientManagerListener (user/hub lifecycle across all hubs).
+    void addClientManagerListener(PyClientManagerListener* listener);
+    void removeClientManagerListener(PyClientManagerListener* listener);
+
+    /// Global SearchManagerListener.
+    void addSearchListener(PySearchManagerListener* listener);
+    void removeSearchListener(PySearchManagerListener* listener);
+
+    /// Global QueueManagerListener.
+    void addQueueListener(PyQueueManagerListener* listener);
+    void removeQueueListener(PyQueueManagerListener* listener);
+
+    /// Global DownloadManagerListener.
+    void addDownloadListener(PyDownloadManagerListener* listener);
+    void removeDownloadListener(PyDownloadManagerListener* listener);
+
+    /// Global UploadManagerListener.
+    void addUploadListener(PyUploadManagerListener* listener);
+    void removeUploadListener(PyUploadManagerListener* listener);
+
+    /// Global TimerManagerListener.
+    void addTimerListener(PyTimerManagerListener* listener);
+    void removeTimerListener(PyTimerManagerListener* listener);
 
     // BridgeListeners needs access to hub data for stashing chat/results
     friend class BridgeListeners;
