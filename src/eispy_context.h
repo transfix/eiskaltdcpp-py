@@ -297,7 +297,7 @@ private:
 
     // State
     std::atomic<bool> m_initialized{false};
-    std::unique_ptr<dcpp::DCContext> m_context;
+    dcpp::DCContext* m_context = nullptr;  // non-owning; shared global
     DCClientCallback* m_callback = nullptr;
     mutable std::mutex m_mutex;
     std::string m_configDir;

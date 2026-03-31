@@ -39,15 +39,21 @@
 // DCContext — application context owning all managers
 // ============================================================================
 
-// Don't let Python delete DCContext through raw pointers from getContext()
+// Don't let Python construct or destroy DCContext directly.
+// The class layout varies with compile-time flags (WITH_DHT, LUA_SCRIPT)
+// which add extra unique_ptr members.  SWIG sees only the members listed
+// here, so `new DCContext()` would allocate an undersized object,
+// corrupting the heap when the real constructor zeroes the missing members.
+//
+// Users should obtain DCContext* via getContext() or EisPyContext.context.
+%nodefaultctor dcpp::DCContext;
 %nodefaultdtor dcpp::DCContext;
 
 namespace dcpp {
 
 class DCContext {
 public:
-    DCContext();
-    ~DCContext();
+    // No constructor exposed — use getContext() instead.
 
     void startup();
     void startupMinimal();

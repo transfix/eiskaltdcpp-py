@@ -254,19 +254,26 @@ class TestHintedUser:
 # ============================================================================
 
 class TestDCContext:
-    def test_construct(self):
-        ctx = dc_core.DCContext()
-        assert ctx is not None
+    """Test DCContext type (cannot construct directly — use getContext())."""
 
-    def test_not_running(self):
-        ctx = dc_core.DCContext()
-        assert not ctx.isRunning()
+    def test_type_exists(self):
+        assert hasattr(dc_core, "DCContext")
 
-    def test_str(self):
-        ctx = dc_core.DCContext()
+    def test_no_direct_construction(self):
+        """DCContext must not be constructable from Python (class layout
+        varies with compile-time flags, so Python-side 'new' would
+        allocate an undersized object and corrupt the heap)."""
+        with pytest.raises((TypeError, AttributeError)):
+            dc_core.DCContext()
+
+    def test_str_via_bridge(self, tmp_path):
+        b = dc_core.EisPyContext()
+        b.initialize(str(tmp_path) + "/")
+        ctx = b.context
         s = str(ctx)
         assert "DCContext" in s
-        assert "False" in s
+        assert "True" in s  # running after initialize
+        b.shutdown()
 
 
 # ============================================================================

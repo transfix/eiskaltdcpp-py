@@ -141,11 +141,24 @@ static void startupCallback(void*, const std::string& msg) {
 }
 
 // =========================================================================
-// Global init guard
+// Global dcpp lifecycle — permanent singleton
+// =========================================================================
+// The dcpp library uses pervasive global state (Util paths, static
+// registrations, manager singletons inside DCContext).  Calling
+// DCContext::shutdown() followed by dcpp::startup() corrupts memory
+// because the library was not designed for restart.
+//
+// Solution: once started, the dcpp core lives for the process lifetime.
+// EisPyContext::shutdown() only cleans up per-instance state (hubs,
+// listeners, file lists).  The DCContext is never destroyed — the OS
+// reclaims everything at process exit.
 // =========================================================================
 
-static std::atomic<bool> g_dcppStarted{false};
-static std::mutex        g_dcppStartupMutex;
+// Raw pointer — intentionally leaked at process exit so that
+// DCContext's destructor never runs (which would double-free managers).
+static dcpp::DCContext* g_dcppContext  = nullptr;
+static bool             g_dcppTimerStarted{false};
+static std::mutex       g_dcppMutex;
 
 // =========================================================================
 // Construction / Destruction
@@ -170,13 +183,6 @@ bool EisPyContext::initialize(const std::string& configDir) {
 
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    {
-        std::lock_guard<std::mutex> glock(g_dcppStartupMutex);
-        if (g_dcppStarted.load()) {
-            return false;
-        }
-    }
-
     std::string cfgDir = configDir;
     if (cfgDir.empty()) {
         const char* home = getenv("HOME");
@@ -199,62 +205,69 @@ bool EisPyContext::initialize(const std::string& configDir) {
         return false;
     }
 
-    Util::PathsMap pathOverrides;
-    pathOverrides[Util::PATH_USER_CONFIG] = cfgDir;
-    pathOverrides[Util::PATH_USER_LOCAL] = cfgDir;
-    Util::initialize(pathOverrides);
-
-    m_context = dcpp::startup(startupCallback, nullptr);
-
-    g_dcppStarted.store(true);
-
-    // Ensure a nick is set
+    // --- Global dcpp lifecycle (permanent singleton) ---
     {
-        auto* sm = getContext()->getSettingsManager();
-        std::string currentNick = sm->get(SettingsManager::NICK, true);
-        if (currentNick.empty()) {
-#ifdef _WIN32
-            std::string defaultNick = "eispy-" + std::to_string(_getpid());
-#else
-            std::string defaultNick = "eispy-" + std::to_string(getpid());
-#endif
-            sm->set(SettingsManager::NICK, defaultNick);
-        }
-    }
+        std::lock_guard<std::mutex> glock(g_dcppMutex);
 
-    // Set a default description
-    {
-        auto* sm = getContext()->getSettingsManager();
-        std::string currentDesc = sm->get(SettingsManager::DESCRIPTION, true);
-        if (currentDesc.empty()) {
-            std::string user, host;
-#ifdef _WIN32
-            char nameBuf[256];
-            DWORD nameSz = sizeof(nameBuf);
-            if (GetUserNameA(nameBuf, &nameSz))
-                user = nameBuf;
-            nameSz = sizeof(nameBuf);
-            if (GetComputerNameA(nameBuf, &nameSz))
-                host = nameBuf;
-#else
-            if (auto* pw = getpwuid(getuid()))
-                user = pw->pw_name;
-            char hostBuf[256];
-            if (gethostname(hostBuf, sizeof(hostBuf)) == 0) {
-                hostBuf[sizeof(hostBuf) - 1] = '\0';
-                host = hostBuf;
+        if (!g_dcppContext) {
+            // First-ever init — perform the real dcpp startup
+            Util::PathsMap pathOverrides;
+            pathOverrides[Util::PATH_USER_CONFIG] = cfgDir;
+            pathOverrides[Util::PATH_USER_LOCAL] = cfgDir;
+            Util::initialize(pathOverrides);
+
+            g_dcppContext = dcpp::startup(startupCallback, nullptr).release();
+
+            // Ensure a nick is set
+            {
+                auto* sm = dcpp::getContext()->getSettingsManager();
+                std::string currentNick = sm->get(SettingsManager::NICK, true);
+                if (currentNick.empty()) {
+                    std::string defaultNick = "eispy-" + std::to_string(getpid());
+                    sm->set(SettingsManager::NICK, defaultNick);
+                }
             }
+
+            // Set a default description
+            {
+                auto* sm = dcpp::getContext()->getSettingsManager();
+                std::string currentDesc = sm->get(SettingsManager::DESCRIPTION, true);
+                if (currentDesc.empty()) {
+                    std::string user, host;
+#ifdef _WIN32
+                    char nameBuf[256];
+                    DWORD nameSz = sizeof(nameBuf);
+                    if (GetUserNameA(nameBuf, &nameSz))
+                        user = nameBuf;
+                    nameSz = sizeof(nameBuf);
+                    if (GetComputerNameA(nameBuf, &nameSz))
+                        host = nameBuf;
+#else
+                    if (auto* pw = getpwuid(getuid()))
+                        user = pw->pw_name;
+                    char hostBuf[256];
+                    if (gethostname(hostBuf, sizeof(hostBuf)) == 0) {
+                        hostBuf[sizeof(hostBuf) - 1] = '\0';
+                        host = hostBuf;
+                    }
 #endif
-            if (!user.empty() && !host.empty())
-                sm->set(SettingsManager::DESCRIPTION, user + "@" + host);
-            else if (!user.empty())
-                sm->set(SettingsManager::DESCRIPTION, user);
+                    if (!user.empty() && !host.empty())
+                        sm->set(SettingsManager::DESCRIPTION, user + "@" + host);
+                    else if (!user.empty())
+                        sm->set(SettingsManager::DESCRIPTION, user);
+                }
+            }
+
+            initLuaScriptingIfPresent();
         }
+
+        if (!g_dcppTimerStarted) {
+            dcpp::getContext()->getTimerManager()->start();
+            g_dcppTimerStarted = true;
+        }
+
+        m_context = g_dcppContext;
     }
-
-    initLuaScriptingIfPresent();
-
-    getContext()->getTimerManager()->start();
 
     m_listeners = std::make_unique<BridgeListeners>(*this);
     m_listeners->subscribeGlobal();
@@ -300,30 +313,20 @@ void EisPyContext::shutdown() {
 
     for (auto* client : clients) {
         client->disconnect(true);
-        getContext()->getClientManager()->putClient(client);
+        dcpp::getContext()->getClientManager()->putClient(client);
     }
 
-    getContext()->getConnectionManager()->shutdown();
-    BufferedSocket::waitShutdown();
+    m_listeners.reset();
+    m_context = nullptr;
 
-#if defined(LUA_SCRIPT) && !defined(_WIN32)
-    {
-        lua_State** lua_state_ptr = resolveLuaStatePtr();
-        if (lua_state_ptr && *lua_state_ptr && s_lua_close) {
-            s_lua_close(*lua_state_ptr);
-            *lua_state_ptr = nullptr;
-        }
-    }
-#endif
-
-    m_context->shutdown();
-    m_context.reset();
-    dcpp::setContext(nullptr);
-
-    {
-        std::lock_guard<std::mutex> glock(g_dcppStartupMutex);
-        g_dcppStarted.store(false);
-    }
+    // Note: we intentionally do NOT call DCContext::shutdown() here.
+    // The dcpp core is a permanent singleton that lives for the process
+    // lifetime.  Calling DCContext::shutdown() destroys all managers
+    // and calls Util::uninitialize(), after which dcpp::startup()
+    // cannot safely be called again (heap corruption).
+    //
+    // Per-instance state (hubs, listeners, file lists) is cleaned up
+    // above.  The OS reclaims dcpp resources at process exit.
 
     m_initialized.store(false);
 }
