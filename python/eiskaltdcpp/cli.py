@@ -66,6 +66,13 @@ from eiskaltdcpp.hub_aliases import (
     remove_alias,
     resolve as resolve_alias,
 )
+from eiskaltdcpp.search_store import (
+    list_saved_searches,
+    load_search,
+    purge_all_searches,
+    purge_search,
+    save_search,
+)
 
 logger = logging.getLogger("eiskaltdcpp.cli")
 
@@ -1175,12 +1182,21 @@ def search():
     """Search the DC network for files.
 
     \b
-    Examples:
+    Live results (accumulated from all searches):
       eispy search query "ubuntu iso"
-      eispy search query "movie.mkv" --type 1 --hub dchub://hub:411
       eispy search results
       eispy search results --json
       eispy search clear
+
+    \b
+    Saved searches (per-query result snapshots):
+      eispy search query "ubuntu iso" --save ubuntu
+      eispy search query "fedora" --save fedora --wait 15
+      eispy search saved
+      eispy search show ubuntu
+      eispy search show ubuntu --json
+      eispy search purge ubuntu
+      eispy search purge --all
     """
 
 
@@ -1194,21 +1210,83 @@ def search():
 @click.option("--size", default=0, type=int, help="Size filter value in bytes.")
 @click.option("--hub", "hub_url", default="", callback=_resolve_hub_cb,
               help="Limit to a specific hub (alias or URL).")
+@click.option("--save", "save_name", default="",
+              help="Save results under this name for later review.")
+@click.option("--wait", "wait_secs", default=10, type=int,
+              help="Seconds to wait for results when using --save (default: 10).")
+@click.option("--min-results", default=1, type=int,
+              help="Minimum results to collect before returning (with --save).")
 @click.pass_context
-def search_query(ctx, terms, file_type, size_mode, size, hub_url):
-    """Search for files on connected hubs."""
+def search_query(ctx, terms, file_type, size_mode, size, hub_url,
+                 save_name, wait_secs, min_results):
+    """Search for files on connected hubs.
+
+    Without --save, fires a search and returns immediately.  Use
+    ``eispy search results`` to view accumulated results later.
+
+    With --save NAME, waits for results and saves them as a named
+    snapshot.  Use ``eispy search show NAME`` to view them.
+
+    \b
+    Examples:
+      eispy search query "ubuntu iso"
+      eispy search query "ubuntu iso" --save ubuntu
+      eispy search query "ubuntu iso" --save ubuntu --wait 20 --min-results 5
+      eispy search query "movie.mkv" --type 6 --hub winter --save movies
+    """
+    if save_name:
+        _search_and_save(ctx, terms, file_type, size_mode, size, hub_url,
+                         save_name, wait_secs, min_results)
+    else:
+        async def _do():
+            async with _get_client(ctx) as client:
+                ok = await client.search_async(
+                    terms, file_type=file_type, size_mode=size_mode,
+                    size=size, hub_url=hub_url,
+                )
+                if ok:
+                    click.echo(f"Search sent: {terms}")
+                    click.echo("Use 'eispy search results' to view results "
+                               "(allow a few seconds).")
+                    click.echo("Tip: use --save NAME to capture results for "
+                               "later review.")
+                else:
+                    click.echo("Search failed", err=True)
+                    raise SystemExit(1)
+        _run(_do())
+
+
+def _search_and_save(ctx, terms, file_type, size_mode, size, hub_url,
+                     save_name, wait_secs, min_results):
+    """Execute a search, wait for results, and save them."""
     async def _do():
         async with _get_client(ctx) as client:
+            # Clear existing results so we capture only this query's results
+            await client.clear_search_results_async(hub_url)
+
             ok = await client.search_async(
                 terms, file_type=file_type, size_mode=size_mode,
                 size=size, hub_url=hub_url,
             )
-            if ok:
-                click.echo(f"Search sent: {terms}")
-                click.echo("Use 'eispy search results' to view results (allow a few seconds).")
-            else:
+            if not ok:
                 click.echo("Search failed", err=True)
                 raise SystemExit(1)
+
+            click.echo(f"Search sent: {terms}")
+            click.echo(f"Waiting up to {wait_secs}s for results...")
+
+            # Wait, then collect whatever accumulated
+            await asyncio.sleep(wait_secs)
+            raw_results = await client.get_search_results_async(hub_url)
+
+            results = [_obj_to_dict(r) for r in raw_results]
+            path = save_search(
+                save_name, terms, results,
+                file_type=file_type, size_mode=size_mode,
+                size=size, hub_url=hub_url,
+            )
+            click.echo(f"Saved {len(results)} result(s) as '{save_name}'")
+            click.echo(f"View with: eispy search show {save_name}")
     _run(_do())
 
 
@@ -1246,6 +1324,80 @@ def search_clear(ctx, hub_url):
             await client.clear_search_results_async(hub_url)
             click.echo("Search results cleared")
     _run(_do())
+
+
+@search.command("saved")
+def search_saved():
+    """List saved search result sets.
+
+    Shows all named searches that were captured with ``--save``.
+    """
+    entries = list_saved_searches()
+    if not entries:
+        click.echo("No saved searches")
+        click.echo("Tip: use 'eispy search query \"terms\" --save NAME' "
+                    "to capture results.")
+        return
+    _print_table(entries, ["name", "query", "count", "timestamp", "hub_url"])
+
+
+@search.command("show")
+@click.argument("name")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+def search_show(name, as_json):
+    """Show results from a saved search.
+
+    \b
+    Examples:
+      eispy search show ubuntu
+      eispy search show ubuntu --json
+    """
+    data = load_search(name)
+    if data is None:
+        click.echo(f"Saved search not found: {name}", err=True)
+        click.echo("Use 'eispy search saved' to list available searches.")
+        raise SystemExit(1)
+
+    click.echo(f"Search: {data.get('query', '?')}  "
+               f"({data.get('count', 0)} results, "
+               f"{data.get('timestamp_iso', '?')})")
+
+    results = data.get("results", [])
+    if as_json:
+        _print_json(results)
+    elif not results:
+        click.echo("No results in this saved search")
+    else:
+        cols = ["file", "size", "tth", "nick", "hubUrl"]
+        available = list(results[0].keys()) if results else []
+        cols = [c for c in cols if c in available] or available[:5]
+        _print_table(results, cols)
+
+
+@search.command("purge")
+@click.argument("name", required=False, default=None)
+@click.option("--all", "purge_all", is_flag=True,
+              help="Purge all saved searches.")
+def search_purge(name, purge_all):
+    """Delete a saved search (or all saved searches).
+
+    \b
+    Examples:
+      eispy search purge ubuntu
+      eispy search purge --all
+    """
+    if purge_all:
+        count = purge_all_searches()
+        click.echo(f"Purged {count} saved search(es)")
+    elif name:
+        if purge_search(name):
+            click.echo(f"Purged saved search: {name}")
+        else:
+            click.echo(f"Saved search not found: {name}", err=True)
+            raise SystemExit(1)
+    else:
+        click.echo("Specify a search name or --all", err=True)
+        raise SystemExit(1)
 
 
 # ============================================================================
