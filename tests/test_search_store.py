@@ -142,6 +142,12 @@ class TestSaveLoad:
         assert data["count"] == 0
         assert data["results"] == []
 
+    def test_returns_path(self, search_dir):
+        path = save_search("test", "q", [])
+        assert isinstance(path, Path)
+        assert path.exists()
+        assert path.name == "test.json"
+
 
 class TestListSavedSearches:
     def test_empty(self, search_dir):
@@ -164,6 +170,14 @@ class TestListSavedSearches:
         assert "results" not in entry  # metadata only
         assert entry["count"] == 2
         assert entry["query"] == "query"
+
+    def test_skips_corrupt_files(self, search_dir):
+        save_search("good", "query", SAMPLE_RESULTS)
+        search_dir.mkdir(parents=True, exist_ok=True)
+        (search_dir / "corrupt.json").write_text("not valid json")
+        entries = list_saved_searches()
+        assert len(entries) == 1
+        assert entries[0]["name"] == "good"
 
 
 class TestPurge:

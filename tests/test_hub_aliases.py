@@ -328,3 +328,92 @@ class TestCLIAliasResolution:
         instance.request_file_list.assert_called_once_with(
             "nmdcs://wintermute:411", "SomeUser", match_queue=False,
         )
+
+    def test_hub_users_resolves_alias(self, alias_file, runner):
+        add_alias("winter", "nmdcs://wintermute:411")
+        from unittest.mock import AsyncMock, patch
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.get_users_async.return_value = []
+
+        with patch("eiskaltdcpp.cli._get_client", return_value=mock_client):
+            result = runner.invoke(cli, ["hub", "users", "winter"])
+
+        assert result.exit_code == 0
+        mock_client.get_users_async.assert_called_once_with(
+            "nmdcs://wintermute:411",
+        )
+
+    def test_chat_pm_resolves_alias(self, alias_file, runner):
+        add_alias("winter", "nmdcs://wintermute:411")
+        from unittest.mock import AsyncMock, patch
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("eiskaltdcpp.cli._get_client", return_value=mock_client):
+            result = runner.invoke(cli, [
+                "chat", "pm", "winter", "SomeUser", "Hello!",
+            ])
+
+        assert result.exit_code == 0
+        mock_client.send_pm_async.assert_called_once_with(
+            "nmdcs://wintermute:411", "SomeUser", "Hello!",
+        )
+
+    def test_chat_history_resolves_alias(self, alias_file, runner):
+        add_alias("winter", "nmdcs://wintermute:411")
+        from unittest.mock import AsyncMock, patch
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.get_chat_history_async.return_value = ["line1"]
+
+        with patch("eiskaltdcpp.cli._get_client", return_value=mock_client):
+            result = runner.invoke(cli, ["chat", "history", "winter"])
+
+        assert result.exit_code == 0
+        mock_client.get_chat_history_async.assert_called_once_with(
+            "nmdcs://wintermute:411", max_lines=50,
+        )
+
+    def test_search_clear_resolves_alias(self, alias_file, runner):
+        add_alias("winter", "nmdcs://wintermute:411")
+        from unittest.mock import AsyncMock, patch
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("eiskaltdcpp.cli._get_client", return_value=mock_client):
+            result = runner.invoke(cli, [
+                "search", "clear", "--hub", "winter",
+            ])
+
+        assert result.exit_code == 0
+        mock_client.clear_search_results_async.assert_called_once_with(
+            "nmdcs://wintermute:411",
+        )
+
+    def test_search_results_resolves_alias(self, alias_file, runner):
+        add_alias("winter", "nmdcs://wintermute:411")
+        from unittest.mock import AsyncMock, patch
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.get_search_results_async.return_value = []
+
+        with patch("eiskaltdcpp.cli._get_client", return_value=mock_client):
+            result = runner.invoke(cli, [
+                "search", "results", "--hub", "winter",
+            ])
+
+        assert result.exit_code == 0
+        mock_client.get_search_results_async.assert_called_once_with(
+            "nmdcs://wintermute:411",
+        )

@@ -258,6 +258,18 @@ bool EisPyContext::initialize(const std::string& configDir) {
                 }
             }
 
+            // Ensure a download directory is set.
+            // On Windows, Util::initialize() may leave PATH_DOWNLOADS empty
+            // (the default-path code is inside a non-Windows #else branch in
+            // dcpp/Util.cpp).  Fall back to the config directory itself.
+            {
+                auto* sm = dcpp::getContext()->getSettingsManager();
+                std::string dlDir = sm->get(SettingsManager::DOWNLOAD_DIRECTORY, true);
+                if (dlDir.empty()) {
+                    sm->set(SettingsManager::DOWNLOAD_DIRECTORY, cfgDir + "Downloads/");
+                }
+            }
+
             initLuaScriptingIfPresent();
         }
 
