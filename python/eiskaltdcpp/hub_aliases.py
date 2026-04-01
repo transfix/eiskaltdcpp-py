@@ -102,3 +102,11 @@ def remove_alias(name: str) -> bool:
 def list_aliases() -> dict[str, str]:
     """Return all hub aliases."""
     return load_aliases()
+
+
+def reverse_lookup(url: str) -> str | None:
+    """Return the alias for a hub URL, or *None* if no alias is defined."""
+    for alias, alias_url in load_aliases().items():
+        if alias_url == url:
+            return alias
+    return None

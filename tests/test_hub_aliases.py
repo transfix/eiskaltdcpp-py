@@ -15,6 +15,7 @@ from eiskaltdcpp.hub_aliases import (
     load_aliases,
     remove_alias,
     resolve,
+    reverse_lookup,
     save_aliases,
 )
 from eiskaltdcpp.cli import cli
@@ -137,6 +138,25 @@ class TestListAliases:
         add_alias("a", "dchub://a:411")
         add_alias("b", "nmdcs://b:411")
         assert list_aliases() == {"a": "dchub://a:411", "b": "nmdcs://b:411"}
+
+
+class TestReverseLookup:
+    def test_found(self, alias_file):
+        add_alias("winter", "nmdcs://wintermute.sublevels.net:411")
+        assert reverse_lookup("nmdcs://wintermute.sublevels.net:411") == "winter"
+
+    def test_not_found(self, alias_file):
+        assert reverse_lookup("dchub://unknown:411") is None
+
+    def test_empty_file(self, alias_file):
+        assert reverse_lookup("dchub://any:411") is None
+
+    def test_first_match_wins(self, alias_file):
+        """When multiple aliases map to the same URL, any one is acceptable."""
+        add_alias("alpha", "dchub://same:411")
+        add_alias("beta", "dchub://same:411")
+        result = reverse_lookup("dchub://same:411")
+        assert result in ("alpha", "beta")
 
 
 class TestGetHubsFile:
