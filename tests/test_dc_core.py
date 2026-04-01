@@ -463,7 +463,7 @@ class TestDCClientWrapper:
         cfg = str(unique_config_dir)
         client = DCClient(cfg)
         r = repr(client)
-        assert cfg in r
+        assert repr(cfg) in r
         assert "not initialized" in r
 
     def test_dc_client_event_registration(self, unique_config_dir):
