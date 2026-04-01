@@ -18,8 +18,8 @@ Usage::
             print(hub.url, hub.name)
 
         # Real-time events via WebSocket
-        async for event, data in client.events():
-            print(event, data)
+        async for event, args in client.events():
+            print(event, args)
 """
 from __future__ import annotations
 
@@ -39,6 +39,7 @@ from eiskaltdcpp.exceptions import (
     LuaRuntimeError,
     LuaSymbolError,
 )
+from eiskaltdcpp.event_meta import EVENT_ARG_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -172,8 +173,10 @@ class RemoteEventStream:
     """
     Async iterator over WebSocket events from the API server.
 
-    Yields ``(event_name, data_dict)`` tuples, matching the
-    ``AsyncDCClient.events()`` interface.
+    Yields ``(event_name, args_tuple)`` tuples, matching the
+    ``AsyncDCClient.events()`` interface.  The JSON data dict received
+    over the wire is converted back to a positional-args tuple using
+    ``EVENT_ARG_NAMES``.
     """
 
     def __init__(self, ws_url: str, token: str,
@@ -183,7 +186,7 @@ class RemoteEventStream:
         self._channels = channels
         self._ws: Optional[Any] = None
         self._closed = False
-        self._queue: asyncio.Queue[tuple[str, dict]] = asyncio.Queue(maxsize=5000)
+        self._queue: asyncio.Queue[tuple[str, tuple]] = asyncio.Queue(maxsize=5000)
         self._task: Optional[asyncio.Task] = None
 
     async def _connect(self) -> None:
@@ -210,13 +213,16 @@ class RemoteEventStream:
                 if msg.get("type") == "event":
                     event_name = msg.get("event", "unknown")
                     data = msg.get("data", {})
+                    # Convert dict → positional-args tuple
+                    arg_names = EVENT_ARG_NAMES.get(event_name, ())
+                    args = tuple(data.get(name) for name in arg_names)
                     try:
-                        self._queue.put_nowait((event_name, data))
+                        self._queue.put_nowait((event_name, args))
                     except asyncio.QueueFull:
                         pass
                 elif msg.get("type") == "status":
                     try:
-                        self._queue.put_nowait(("_status", msg.get("data", {})))
+                        self._queue.put_nowait(("_status", ()))
                     except asyncio.QueueFull:
                         pass
         except asyncio.CancelledError:
@@ -227,7 +233,7 @@ class RemoteEventStream:
     def __aiter__(self) -> RemoteEventStream:
         return self
 
-    async def __anext__(self) -> tuple[str, dict]:
+    async def __anext__(self) -> tuple[str, tuple]:
         if self._closed:
             raise StopAsyncIteration
         if self._ws is None:
@@ -292,6 +298,8 @@ class RemoteDCClient:
         self._handlers: dict[str, list[Callable]] = {}
         self._version: Optional[str] = None
         self._initialized = False
+        self._event_dispatch_task: Optional[asyncio.Task] = None
+        self._event_stream: Optional[RemoteEventStream] = None
 
     # ---- Lifecycle ----
 
@@ -356,7 +364,17 @@ class RemoteDCClient:
         raise cls(message)
 
     async def close(self) -> None:
-        """Close the HTTP client."""
+        """Close the HTTP client and event dispatch resources."""
+        if self._event_dispatch_task:
+            self._event_dispatch_task.cancel()
+            try:
+                await self._event_dispatch_task
+            except asyncio.CancelledError:
+                pass
+            self._event_dispatch_task = None
+        if self._event_stream:
+            await self._event_stream.close()
+            self._event_stream = None
         if self._http and not self._http.is_closed:
             await self._http.aclose()
 
@@ -372,6 +390,9 @@ class RemoteDCClient:
         data = resp.json()
         self._token = data["access_token"]
         self._username = username
+        # Start auto-dispatch if handlers were registered before login
+        if self._handlers and self._event_dispatch_task is None:
+            self._start_event_dispatch()
         return self._token
 
     # ---- Properties ----
@@ -681,8 +702,9 @@ class RemoteDCClient:
         """
         Get a real-time event stream via WebSocket.
 
-        Returns an async iterator yielding ``(event_name, data_dict)``
+        Returns an async iterator yielding ``(event_name, args_tuple)``
         tuples, matching the ``AsyncDCClient.events()`` interface.
+        The JSON data dict is converted to a positional-args tuple.
 
         Args:
             channels: Comma-separated channel names
@@ -690,26 +712,37 @@ class RemoteDCClient:
 
         Example::
 
-            async for event, data in client.events("chat,search"):
+            async for event, args in client.events("chat,search"):
                 if event == "chat_message":
-                    print(f"<{data['nick']}> {data['message']}")
+                    hub_url, nick, message, third_person = args
+                    print(f"<{nick}> {message}")
         """
         ws_base = self._base_url.replace("http://", "ws://").replace(
             "https://", "wss://")
         ws_url = f"{ws_base}/ws/events"
         return RemoteEventStream(ws_url, self._token or "", channels)
 
-    # ---- Event handlers (for compatibility) ----
+    # ---- Event handlers ----
 
     def on(self, event: str, handler: Optional[Callable] = None):
         """
         Register an event handler (decorator compatible).
 
-        Note: To receive events, you must also iterate ``client.events()``
-        in a background task.
+        Handlers receive positional arguments matching the event signature,
+        identical to ``AsyncDCClient.on()``.  A background dispatch task
+        is started automatically after authentication.
+
+        Example::
+
+            @client.on('chat_message')
+            async def handle(hub_url, nick, message, third_person):
+                print(f'<{nick}> {message}')
         """
         def decorator(fn):
             self._handlers.setdefault(event, []).append(fn)
+            # Start dispatch if authenticated and not already running
+            if self._token and self._event_dispatch_task is None:
+                self._start_event_dispatch()
             return fn
         if handler is not None:
             return decorator(handler)
@@ -720,6 +753,41 @@ class RemoteDCClient:
         handlers = self._handlers.get(event, [])
         if handler in handlers:
             handlers.remove(handler)
+
+    def _start_event_dispatch(self) -> None:
+        """Start the background event dispatch loop."""
+        if self._event_dispatch_task is not None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+            self._event_dispatch_task = loop.create_task(
+                self._event_dispatch_loop()
+            )
+        except RuntimeError:
+            pass  # No event loop; will start after login in an async context
+
+    async def _event_dispatch_loop(self) -> None:
+        """Read events from WebSocket and invoke registered handlers."""
+        try:
+            if self._event_stream is None:
+                self._event_stream = self.events()
+            async for event_name, args in self._event_stream:
+                if event_name.startswith("_"):
+                    continue
+                handlers = list(self._handlers.get(event_name, []))
+                for handler in handlers:
+                    try:
+                        result = handler(*args)
+                        if asyncio.iscoroutine(result):
+                            asyncio.ensure_future(result)
+                    except Exception:
+                        logger.exception(
+                            "Error in handler for '%s'", event_name
+                        )
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("Event dispatch loop error")
 
     # ---- User management ----
 

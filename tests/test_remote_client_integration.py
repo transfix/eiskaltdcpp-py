@@ -15,6 +15,7 @@ Run:
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -26,11 +27,13 @@ from eiskaltdcpp.api.client import (
     HubInfo,
     QueueItemInfo,
     RemoteDCClient,
+    RemoteEventStream,
     SearchResultInfo,
     ShareInfoData,
     TransferStats,
     UserInfo,
 )
+from eiskaltdcpp.event_meta import EVENT_ARG_NAMES
 
 # ============================================================================
 # Mock DC client — mirrors the one in test_client.py
@@ -663,3 +666,241 @@ class TestFullWorkflow:
         assert len(hubs) == 0
         queue = await client.list_queue()
         assert len(queue) == 0
+
+
+# ============================================================================
+# Event stream normalization — RemoteEventStream yields tuples
+# ============================================================================
+
+class TestEventStreamNormalization:
+    """Verify RemoteEventStream converts dicts → positional-args tuples."""
+
+    async def test_stream_yields_tuples_not_dicts(self):
+        """RemoteEventStream.__anext__() must yield (name, tuple) not (name, dict)."""
+        stream = RemoteEventStream("ws://fake:9999", "tok")
+        # Pretend connected with a mock websocket
+        stream._ws = AsyncMock()
+        stream._queue.put_nowait(("chat_message", (
+            "dchub://h:411", "Alice", "Hi", False,
+        )))
+
+        event, args = await stream.__anext__()
+        assert event == "chat_message"
+        assert isinstance(args, tuple)
+        assert args == ("dchub://h:411", "Alice", "Hi", False)
+        await stream.close()
+
+
+# ============================================================================
+# RemoteDCClient auto-dispatch — on() handlers fire automatically
+# ============================================================================
+
+class TestAutoDispatch:
+    """
+    Verify that .on() handlers on RemoteDCClient are automatically
+    invoked when events arrive, matching AsyncDCClient behaviour.
+    """
+
+    async def test_on_handler_receives_positional_args(self):
+        """Handler registered via .on() receives *args, not a dict."""
+        client = RemoteDCClient("http://fake:9999")
+        client._token = "fake-token"
+
+        received = []
+
+        @client.on("chat_message")
+        def handler(hub_url, nick, message, third_person):
+            received.append((hub_url, nick, message, third_person))
+
+        # Simulate event arrival by pushing directly to the dispatch stream
+        # (avoids needing a real WebSocket server)
+        fake_stream = RemoteEventStream("ws://fake:9999", "tok")
+        fake_stream._ws = AsyncMock()
+        fake_stream._queue.put_nowait((
+            "chat_message",
+            ("dchub://hub:411", "Alice", "Hello!", False),
+        ))
+
+        client._event_stream = fake_stream
+        client._event_dispatch_task = asyncio.create_task(
+            client._event_dispatch_loop()
+        )
+
+        await asyncio.sleep(0.05)
+
+        # Cancel the dispatch loop
+        client._event_dispatch_task.cancel()
+        try:
+            await client._event_dispatch_task
+        except asyncio.CancelledError:
+            pass
+
+        assert len(received) == 1
+        assert received[0] == ("dchub://hub:411", "Alice", "Hello!", False)
+
+    async def test_async_handler_dispatched(self):
+        """Async handlers registered via .on() are scheduled as tasks."""
+        client = RemoteDCClient("http://fake:9999")
+        client._token = "fake-token"
+
+        received = []
+
+        @client.on("hub_connected")
+        async def handler(hub_url, hub_name):
+            received.append((hub_url, hub_name))
+
+        fake_stream = RemoteEventStream("ws://fake:9999", "tok")
+        fake_stream._ws = AsyncMock()
+        fake_stream._queue.put_nowait((
+            "hub_connected",
+            ("dchub://hub:411", "TestHub"),
+        ))
+
+        client._event_stream = fake_stream
+        client._event_dispatch_task = asyncio.create_task(
+            client._event_dispatch_loop()
+        )
+
+        await asyncio.sleep(0.1)
+
+        client._event_dispatch_task.cancel()
+        try:
+            await client._event_dispatch_task
+        except asyncio.CancelledError:
+            pass
+
+        assert len(received) == 1
+        assert received[0] == ("dchub://hub:411", "TestHub")
+
+    async def test_multiple_handlers_all_invoked(self):
+        """Multiple handlers for the same event all fire."""
+        client = RemoteDCClient("http://fake:9999")
+        client._token = "fake-token"
+
+        results_a = []
+        results_b = []
+
+        @client.on("user_connected")
+        def handler_a(hub_url, nick):
+            results_a.append(nick)
+
+        @client.on("user_connected")
+        def handler_b(hub_url, nick):
+            results_b.append(nick)
+
+        fake_stream = RemoteEventStream("ws://fake:9999", "tok")
+        fake_stream._ws = AsyncMock()
+        fake_stream._queue.put_nowait((
+            "user_connected", ("dchub://h:411", "Alice"),
+        ))
+
+        client._event_stream = fake_stream
+        client._event_dispatch_task = asyncio.create_task(
+            client._event_dispatch_loop()
+        )
+
+        await asyncio.sleep(0.05)
+        client._event_dispatch_task.cancel()
+        try:
+            await client._event_dispatch_task
+        except asyncio.CancelledError:
+            pass
+
+        assert results_a == ["Alice"]
+        assert results_b == ["Alice"]
+
+    async def test_off_removes_handler(self):
+        """off() prevents a handler from being invoked."""
+        client = RemoteDCClient("http://fake:9999")
+        client._token = "fake-token"
+
+        received = []
+
+        @client.on("hub_disconnected")
+        def handler(hub_url, reason):
+            received.append(reason)
+
+        client.off("hub_disconnected", handler)
+
+        fake_stream = RemoteEventStream("ws://fake:9999", "tok")
+        fake_stream._ws = AsyncMock()
+        fake_stream._queue.put_nowait((
+            "hub_disconnected", ("dchub://h:411", "Timeout"),
+        ))
+
+        client._event_stream = fake_stream
+        client._event_dispatch_task = asyncio.create_task(
+            client._event_dispatch_loop()
+        )
+
+        await asyncio.sleep(0.05)
+        client._event_dispatch_task.cancel()
+        try:
+            await client._event_dispatch_task
+        except asyncio.CancelledError:
+            pass
+
+        assert received == []
+
+    async def test_dispatch_skips_internal_events(self):
+        """Events starting with '_' (e.g. _status) are skipped."""
+        client = RemoteDCClient("http://fake:9999")
+        client._token = "fake-token"
+
+        received = []
+        client._handlers["_status"] = [lambda: received.append(True)]
+
+        fake_stream = RemoteEventStream("ws://fake:9999", "tok")
+        fake_stream._ws = AsyncMock()
+        fake_stream._queue.put_nowait(("_status", ()))
+
+        client._event_stream = fake_stream
+        client._event_dispatch_task = asyncio.create_task(
+            client._event_dispatch_loop()
+        )
+
+        await asyncio.sleep(0.05)
+        client._event_dispatch_task.cancel()
+        try:
+            await client._event_dispatch_task
+        except asyncio.CancelledError:
+            pass
+
+        assert received == []
+
+    @pytest.mark.parametrize("event_type", sorted(EVENT_ARG_NAMES.keys()))
+    async def test_every_event_dispatches_correct_args(self, event_type):
+        """Every event type delivers the correct positional args to handlers."""
+        from tests.test_websocket import _SAMPLE_ARGS
+
+        client = RemoteDCClient("http://fake:9999")
+        client._token = "fake-token"
+
+        received = []
+        expected_args = _SAMPLE_ARGS[event_type]
+
+        def handler(*args):
+            received.append(args)
+
+        client.on(event_type, handler)
+
+        fake_stream = RemoteEventStream("ws://fake:9999", "tok")
+        fake_stream._ws = AsyncMock()
+        fake_stream._queue.put_nowait((event_type, expected_args))
+
+        client._event_stream = fake_stream
+        client._event_dispatch_task = asyncio.create_task(
+            client._event_dispatch_loop()
+        )
+
+        await asyncio.sleep(0.05)
+        client._event_dispatch_task.cancel()
+        try:
+            await client._event_dispatch_task
+        except asyncio.CancelledError:
+            pass
+
+        assert len(received) == 1, f"No dispatch for {event_type}"
+        assert received[0] == expected_args, (
+            f"{event_type}: expected {expected_args}, got {received[0]}"
+        )

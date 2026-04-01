@@ -95,6 +95,9 @@ add_custom_command(TARGET dc_core POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/search_store.py
         ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/search_store.py
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/event_meta.py
+        ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/event_meta.py
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/api
         ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/api
