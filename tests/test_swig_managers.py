@@ -47,6 +47,7 @@ class TestSwigManagerTypes:
         "FavoriteManager",
         "FinishedManager",
         "ConnectivityManager",
+        "ConnectionManager",
         "MappingManager",
         "CryptoManager",
         "LogManager",
@@ -54,6 +55,7 @@ class TestSwigManagerTypes:
         "DebugManager",
         "TimerManager",
         "ResourceManager",
+        "DynDNS",
     ]
 
     CORE_TYPES = [
@@ -422,6 +424,23 @@ class TestBridgeManagerProperties:
     def test_debug_manager(self, bridge):
         dm = bridge.debug_manager
         assert dm is not None
+
+    def test_connection_manager(self, bridge):
+        cm = bridge.connection_manager
+        assert cm is not None
+        s = str(cm)
+        assert "ConnectionManager" in s
+
+    def test_connection_manager_ports(self, bridge):
+        cm = bridge.connection_manager
+        assert isinstance(cm.port, str)
+        assert isinstance(cm.secure_port, str)
+
+    def test_dyndns(self, bridge):
+        dd = bridge.dyndns
+        assert dd is not None
+        s = str(dd)
+        assert "DynDNS" in s
 
 
 # ============================================================================

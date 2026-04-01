@@ -149,5 +149,17 @@ using eiskaltdcpp_py::EisPyContext;
         """Direct access to IPFilter."""
         ctx = self.getContext()
         return ctx.getIPFilter() if ctx else None
+
+    @property
+    def connection_manager(self):
+        """Direct access to ConnectionManager."""
+        ctx = self.getContext()
+        return ctx.getConnectionManager() if ctx else None
+
+    @property
+    def dyndns(self):
+        """Direct access to DynDNS."""
+        ctx = self.getContext()
+        return ctx.getDynDNS() if ctx else None
     %}
 }

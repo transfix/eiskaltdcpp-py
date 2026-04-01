@@ -32,7 +32,9 @@
 #include <dcpp/ADLSearch.h>
 #include <dcpp/DebugManager.h>
 #include <dcpp/ResourceManager.h>
+#include <dcpp/ConnectionManager.h>
 #include "extra/ipfilter.h"
+#include "extra/dyndns.h"
 %}
 
 // ============================================================================
@@ -80,6 +82,8 @@ public:
     ADLSearchManager*    getADLSearchManager()    const noexcept;
     DebugManager*        getDebugManager()        const noexcept;
     ResourceManager*     getResourceManager()     const noexcept;
+    ConnectionManager*   getConnectionManager()   const noexcept;
+    DynDNS*              getDynDNS()              const noexcept;
 };
 
 }  // namespace dcpp

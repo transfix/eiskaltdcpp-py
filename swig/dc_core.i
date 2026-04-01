@@ -119,6 +119,8 @@ namespace std {
 %include "dcpp_ipfilter.i"
 %include "dcpp_adl_search.i"
 %include "dcpp_debug_manager.i"
+%include "dcpp_connection_manager.i"
+%include "dcpp_dyndns.i"
 
 // DCContext — full class with typed manager accessors (AFTER all managers)
 %include "dcpp_context.i"

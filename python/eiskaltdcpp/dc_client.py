@@ -358,6 +358,16 @@ class DCClient:
         """Direct access to ADLSearchManager."""
         return self._bridge.adl_search_manager
 
+    @property
+    def connection_manager(self):
+        """Direct access to ConnectionManager."""
+        return self._bridge.connection_manager
+
+    @property
+    def dyndns(self):
+        """Direct access to DynDNS."""
+        return self._bridge.dyndns
+
     # ------------------------------------------------------------------
     # Event registration
     # ------------------------------------------------------------------

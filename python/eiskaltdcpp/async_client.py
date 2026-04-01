@@ -206,6 +206,16 @@ class AsyncDCClient:
         """Direct access to ADLSearchManager."""
         return self._sync_client.adl_search
 
+    @property
+    def connection_manager(self):
+        """Direct access to ConnectionManager."""
+        return self._sync_client.connection_manager
+
+    @property
+    def dyndns(self):
+        """Direct access to DynDNS."""
+        return self._sync_client.dyndns
+
     async def __aenter__(self) -> "AsyncDCClient":
         await self.initialize()
         return self
