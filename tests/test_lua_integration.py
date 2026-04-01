@@ -370,27 +370,27 @@ class TestAsyncLuaEval:
 
     @pytest.fixture(autouse=True)
     def _skip_if_no_lua(self, async_client):
-        if not async_client.lua_is_available():
+        if not async_client._sync_client.lua_is_available():
             pytest.skip("Lua scripting not available in this build")
         try:
-            async_client.lua_eval("-- probe")
+            async_client._sync_client.lua_eval("-- probe")
         except (LuaSymbolError, LuaError):
             pytest.skip("Lua eval not functional in this environment")
 
     @pytest.mark.asyncio
     async def test_async_eval_success(self, async_client):
-        async_client.lua_eval('print("async eval ok")')
+        await async_client.lua_eval('print("async eval ok")')
 
     @pytest.mark.asyncio
     async def test_async_eval_raises_on_error(self, async_client):
         with pytest.raises(LuaRuntimeError):
-            async_client.lua_eval('error("async test error")')
+            await async_client.lua_eval('error("async test error")')
 
     @pytest.mark.asyncio
     async def test_async_eval_file(self, async_client, tmp_path):
         script = tmp_path / "async_test.lua"
         script.write_text('assert(1 + 1 == 2)\n')
-        async_client.lua_eval_file(str(script))
+        await async_client.lua_eval_file(str(script))
 
 
 # ============================================================================
@@ -429,7 +429,7 @@ class TestTLSEncryption:
             # Give the cipher info a moment to propagate
             await asyncio.sleep(2)
 
-            hubs = async_client.list_hubs()
+            hubs = await async_client.list_hubs()
             assert len(hubs) > 0, "Should have at least one hub"
 
             hub = next((h for h in hubs if HUB_URL in h.url), None)

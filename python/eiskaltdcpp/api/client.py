@@ -13,7 +13,7 @@ Usage::
                                username="admin",
                                password="secret") as client:
         await client.connect("dchub://hub.example.com:411")
-        hubs = client.list_hubs()
+        hubs = await client.list_hubs()
         for hub in hubs:
             print(hub.url, hub.name)
 
@@ -266,7 +266,7 @@ class RemoteDCClient:
         await client.login("admin", "password")
 
         await client.connect("dchub://hub.example.com:411")
-        hubs = client.list_hubs()
+        hubs = await client.list_hubs()
 
         async for event, data in client.events():
             print(event, data)
@@ -395,76 +395,55 @@ class RemoteDCClient:
         """Disconnect from a DC hub."""
         await self._post("/api/hubs/disconnect", {"url": url})
 
-    def list_hubs(self) -> list[HubInfo]:
-        """List connected hubs (sync wrapper, call from async with await)."""
-        raise TypeError(
-            "list_hubs() is async on RemoteDCClient. "
-            "Use 'hubs = await client.list_hubs_async()' instead."
-        )
-
-    async def list_hubs_async(self) -> list[HubInfo]:
+    async def list_hubs(self) -> list[HubInfo]:
         """List connected hubs."""
         data = await self._get("/api/hubs")
         return [HubInfo(**h) for h in data.get("hubs", [])]
 
-    def is_connected(self, url: str) -> bool:
-        raise TypeError("Use await is_connected_async()")
 
-    async def is_connected_async(self, url: str) -> bool:
+    async def is_connected(self, url: str) -> bool:
         """Check if connected to a hub."""
-        hubs = await self.list_hubs_async()
+        hubs = await self.list_hubs()
         return any(h.url == url and h.connected for h in hubs)
+
 
     # ---- Chat ----
 
-    def send_message(self, hub_url: str, message: str) -> None:
-        raise TypeError("Use await send_message_async()")
-
-    async def send_message_async(self, hub_url: str, message: str) -> None:
+    async def send_message(self, hub_url: str, message: str) -> None:
         """Send a public chat message."""
         await self._post("/api/chat/message",
                          {"hub_url": hub_url, "message": message})
 
-    def send_pm(self, hub_url: str, nick: str, message: str) -> None:
-        raise TypeError("Use await send_pm_async()")
 
-    async def send_pm_async(self, hub_url: str, nick: str,
-                            message: str) -> None:
+    async def send_pm(self, hub_url: str, nick: str,
+                      message: str) -> None:
         """Send a private message."""
         await self._post("/api/chat/pm",
                          {"hub_url": hub_url, "nick": nick,
                           "message": message})
 
-    def get_chat_history(self, hub_url: str,
-                         max_lines: int = 100) -> list[str]:
-        raise TypeError("Use await get_chat_history_async()")
 
-    async def get_chat_history_async(self, hub_url: str,
-                                     max_lines: int = 100) -> list[str]:
+    async def get_chat_history(self, hub_url: str,
+                               max_lines: int = 100) -> list[str]:
         """Get chat history for a hub."""
         data = await self._get("/api/chat/history",
                                hub_url=hub_url, max_lines=max_lines)
         return data.get("messages", [])
 
+
     # ---- Users ----
 
-    def get_users(self, hub_url: str) -> list[UserInfo]:
-        raise TypeError("Use await get_users_async()")
-
-    async def get_users_async(self, hub_url: str) -> list[UserInfo]:
+    async def get_users(self, hub_url: str) -> list[UserInfo]:
         """Get users on a hub."""
         data = await self._get("/api/hubs/users", hub_url=hub_url)
         return [UserInfo(**u) for u in data.get("users", [])]
 
+
     # ---- Search ----
 
-    def search(self, query: str, file_type: int = 0, size_mode: int = 0,
-               size: int = 0, hub_url: str = "") -> bool:
-        raise TypeError("Use await search_async()")
-
-    async def search_async(self, query: str, file_type: int = 0,
-                           size_mode: int = 0, size: int = 0,
-                           hub_url: str = "") -> bool:
+    async def search(self, query: str, file_type: int = 0,
+                     size_mode: int = 0, size: int = 0,
+                     hub_url: str = "") -> bool:
         """Start a search."""
         try:
             await self._post("/api/search", {
@@ -475,32 +454,25 @@ class RemoteDCClient:
         except httpx.HTTPStatusError:
             return False
 
-    def get_search_results(self, hub_url: str = "") -> list[SearchResultInfo]:
-        raise TypeError("Use await get_search_results_async()")
 
-    async def get_search_results_async(
+    async def get_search_results(
         self, hub_url: str = "",
     ) -> list[SearchResultInfo]:
         """Get accumulated search results."""
         data = await self._get("/api/search/results", hub_url=hub_url)
         return [SearchResultInfo(**r) for r in data.get("results", [])]
 
-    def clear_search_results(self, hub_url: str = "") -> None:
-        raise TypeError("Use await clear_search_results_async()")
 
-    async def clear_search_results_async(self, hub_url: str = "") -> None:
+    async def clear_search_results(self, hub_url: str = "") -> None:
         """Clear search results."""
         await self._delete("/api/search/results", hub_url=hub_url)
 
+
     # ---- Queue ----
 
-    def download(self, directory: str, name: str, size: int, tth: str,
-                 hub_url: str = "", nick: str = "") -> bool:
-        raise TypeError("Use await download_async()")
-
-    async def download_async(self, directory: str, name: str, size: int,
-                             tth: str, hub_url: str = "",
-                             nick: str = "") -> bool:
+    async def download(self, directory: str, name: str, size: int,
+                       tth: str, hub_url: str = "",
+                       nick: str = "") -> bool:
         """Add a file to the download queue."""
         try:
             await self._post("/api/queue", {
@@ -511,11 +483,9 @@ class RemoteDCClient:
         except httpx.HTTPStatusError:
             return False
 
-    def download_magnet(self, magnet: str, download_dir: str = "") -> bool:
-        raise TypeError("Use await download_magnet_async()")
 
-    async def download_magnet_async(self, magnet: str,
-                                    download_dir: str = "") -> bool:
+    async def download_magnet(self, magnet: str,
+                              download_dir: str = "") -> bool:
         """Add a magnet link to the download queue."""
         try:
             await self._post("/api/queue/magnet",
@@ -524,43 +494,33 @@ class RemoteDCClient:
         except httpx.HTTPStatusError:
             return False
 
-    def remove_download(self, target: str) -> None:
-        raise TypeError("Use await remove_download_async()")
 
-    async def remove_download_async(self, target: str) -> None:
+    async def remove_download(self, target: str) -> None:
         """Remove a download from the queue."""
         await self._delete(f"/api/queue/{target}")
 
-    def list_queue(self) -> list[QueueItemInfo]:
-        raise TypeError("Use await list_queue_async()")
 
-    async def list_queue_async(self) -> list[QueueItemInfo]:
+    async def list_queue(self) -> list[QueueItemInfo]:
         """List the download queue."""
         data = await self._get("/api/queue")
         return [QueueItemInfo(**q) for q in data.get("items", [])]
 
-    def clear_queue(self) -> None:
-        raise TypeError("Use await clear_queue_async()")
 
-    async def clear_queue_async(self) -> None:
+    async def clear_queue(self) -> None:
         """Clear the entire download queue."""
         await self._delete("/api/queue")
 
-    def set_priority(self, target: str, priority: int) -> None:
-        raise TypeError("Use await set_priority_async()")
 
-    async def set_priority_async(self, target: str, priority: int) -> None:
+    async def set_priority(self, target: str, priority: int) -> None:
         """Set download priority."""
         await self._put(f"/api/queue/{target}/priority",
                         {"priority": priority})
 
+
     # ---- Shares ----
 
-    def add_share(self, real_path: str, virtual_name: str) -> bool:
-        raise TypeError("Use await add_share_async()")
-
-    async def add_share_async(self, real_path: str,
-                              virtual_name: str) -> bool:
+    async def add_share(self, real_path: str,
+                        virtual_name: str) -> bool:
         """Add a directory to share."""
         try:
             await self._post("/api/shares",
@@ -570,10 +530,8 @@ class RemoteDCClient:
         except httpx.HTTPStatusError:
             return False
 
-    def remove_share(self, real_path: str) -> bool:
-        raise TypeError("Use await remove_share_async()")
 
-    async def remove_share_async(self, real_path: str) -> bool:
+    async def remove_share(self, real_path: str) -> bool:
         """Remove a directory from share."""
         try:
             await self._delete("/api/shares", real_path=real_path)
@@ -581,33 +539,22 @@ class RemoteDCClient:
         except httpx.HTTPStatusError:
             return False
 
-    def list_shares(self) -> list[ShareInfoData]:
-        raise TypeError("Use await list_shares_async()")
 
-    async def list_shares_async(self) -> list[ShareInfoData]:
+    async def list_shares(self) -> list[ShareInfoData]:
         """List shared directories."""
         data = await self._get("/api/shares")
         return [ShareInfoData(**s) for s in data.get("shares", [])]
 
-    def refresh_share(self) -> None:
-        raise TypeError("Use await refresh_share_async()")
 
-    async def refresh_share_async(self) -> None:
+    async def refresh_share(self) -> None:
         """Refresh shared file lists."""
         await self._post("/api/shares/refresh")
 
-    @property
-    def share_size(self) -> int:
-        raise TypeError("Use await get_share_size()")
 
     async def get_share_size(self) -> int:
         """Get total share size."""
         data = await self._get("/api/shares")
         return data.get("total_size", 0)
-
-    @property
-    def shared_files(self) -> int:
-        raise TypeError("Use await get_shared_files()")
 
     async def get_shared_files(self) -> int:
         """Get total shared files count."""
@@ -616,77 +563,54 @@ class RemoteDCClient:
 
     # ---- Settings ----
 
-    def get_setting(self, name: str) -> str:
-        raise TypeError("Use await get_setting_async()")
-
-    async def get_setting_async(self, name: str) -> str:
+    async def get_setting(self, name: str) -> str:
         """Get a DC client setting."""
         data = await self._get(f"/api/settings/{name}")
         return data.get("value", "")
 
-    def set_setting(self, name: str, value: str) -> None:
-        raise TypeError("Use await set_setting_async()")
 
-    async def set_setting_async(self, name: str, value: str) -> None:
+    async def set_setting(self, name: str, value: str) -> None:
         """Set a DC client setting."""
         await self._put(f"/api/settings/{name}",
                         {"name": name, "value": value})
 
-    def reload_config(self) -> None:
-        raise TypeError("Use await reload_config_async()")
 
-    async def reload_config_async(self) -> None:
+    async def reload_config(self) -> None:
         """Reload DC client configuration."""
         await self._post("/api/settings/reload")
 
-    def start_networking(self) -> None:
-        raise TypeError("Use await start_networking_async()")
 
-    async def start_networking_async(self) -> None:
+    async def start_networking(self) -> None:
         """Rebind network listeners."""
         await self._post("/api/settings/networking")
 
-    # ---- Transfers & Hashing ----
 
-    @property
-    def transfer_stats(self) -> TransferStats:
-        raise TypeError("Use await get_transfer_stats()")
+    # ---- Transfers & Hashing ----
 
     async def get_transfer_stats(self) -> TransferStats:
         """Get transfer statistics."""
         data = await self._get("/api/status/transfers")
         return TransferStats(**data)
 
-    @property
-    def hash_status(self) -> HashStatus:
-        raise TypeError("Use await get_hash_status()")
-
     async def get_hash_status(self) -> HashStatus:
         """Get hashing status."""
         data = await self._get("/api/status/hashing")
         return HashStatus(**data)
 
-    def pause_hashing(self, pause: bool = True) -> None:
-        raise TypeError("Use await pause_hashing_async()")
-
-    async def pause_hashing_async(self, pause: bool = True) -> None:
+    async def pause_hashing(self, pause: bool = True) -> None:
         """Pause or resume file hashing."""
         await self._post("/api/status/hashing/pause", pause=pause)
 
+
     # ---- Lua scripting ----
 
-    def lua_is_available(self) -> bool:
-        raise TypeError("Use await lua_is_available_async()")
-
-    async def lua_is_available_async(self) -> bool:
+    async def lua_is_available(self) -> bool:
         """Check if Lua scripting is available."""
         data = await self._get("/api/lua/status")
         return data.get("available", False)
 
-    def lua_eval(self, code: str) -> str:
-        raise TypeError("Use await lua_eval_async()")
 
-    async def lua_eval_async(self, code: str) -> None:
+    async def lua_eval(self, code: str) -> None:
         """Evaluate a Lua code chunk.
 
         Raises LuaError subclasses on failure.
@@ -697,10 +621,8 @@ class RemoteDCClient:
             error_type = data.get("error_type", "")
             self._raise_lua_error(error_msg, error_type)
 
-    def lua_eval_file(self, path: str) -> str:
-        raise TypeError("Use await lua_eval_file_async()")
 
-    async def lua_eval_file_async(self, path: str) -> None:
+    async def lua_eval_file(self, path: str) -> None:
         """Evaluate a Lua file.
 
         Raises LuaError subclasses on failure.
@@ -711,21 +633,18 @@ class RemoteDCClient:
             error_type = data.get("error_type", "")
             self._raise_lua_error(error_msg, error_type)
 
-    def lua_get_scripts_path(self) -> str:
-        raise TypeError("Use await lua_get_scripts_path_async()")
 
-    async def lua_get_scripts_path_async(self) -> str:
+    async def lua_get_scripts_path(self) -> str:
         """Get the scripts directory path."""
         data = await self._get("/api/lua/status")
         return data.get("scripts_path", "")
 
-    def lua_list_scripts(self) -> list[str]:
-        raise TypeError("Use await lua_list_scripts_async()")
 
-    async def lua_list_scripts_async(self) -> list[str]:
+    async def lua_list_scripts(self) -> list[str]:
         """List Lua script files."""
         data = await self._get("/api/lua/scripts")
         return data.get("scripts", [])
+
 
     # ---- Status ----
 

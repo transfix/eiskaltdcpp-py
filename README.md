@@ -9,6 +9,9 @@ This project wraps the eiskaltdcpp core C++ library via SWIG, providing:
 
 - **`dc_core`** — Low-level SWIG module exposing `DCBridge`, `DCClientCallback`, and data types
 - **`eiskaltdcpp.DCClient`** — High-level Pythonic wrapper with event handlers and context manager
+- **`eiskaltdcpp.AsyncDCClient`** — Async wrapper bridging C++ threads to asyncio
+- **`eiskaltdcpp.api.client.RemoteDCClient`** — REST/WebSocket client for remote control
+- **`eiskaltdcpp.DCClientProtocol`** — Unified async protocol implemented by both `AsyncDCClient` and `RemoteDCClient`, so UI code works identically against a local or remote backend
 
 ### Features
 
@@ -22,6 +25,7 @@ This project wraps the eiskaltdcpp core C++ library via SWIG, providing:
 - File hashing control
 - Embedded Lua scripting with typed exception handling
 - Event-driven callback system (hub events, chat, users, transfers, etc.)
+- Unified `DCClientProtocol` — write code once, run it against a local SWIG client or a remote REST API
 
 ## Installation
 
@@ -31,7 +35,11 @@ This project wraps the eiskaltdcpp core C++ library via SWIG, providing:
 pip install eiskaltdcpp-py
 ```
 
-Pre-built wheels are available for Linux x86_64, Python 3.10–3.13.
+Pre-built wheels are available for Python 3.10–3.13 on:
+- **Linux** x86_64 (manylinux_2_28)
+- **macOS** arm64 (Apple Silicon) and x86_64 (Intel)
+- **Windows** AMD64
+
 All C++ dependencies are bundled — no system packages needed.
 
 ### From source (pip)
@@ -191,6 +199,9 @@ python examples/remote_client.py --url http://localhost:8080 --user admin --pass
 
 ```
 ┌──────────────────────────────────┐
+│  DCClientProtocol                │  Unified async interface (Protocol)
+│  (protocol.py)                   │  Write once, run local or remote
+├──────────────────────────────────┤
 │  RemoteDCClient                  │  Control a running server over HTTP/WS
 │  (api/client.py)                 │  Bot / integration friendly
 ├──────────────────────────────────┤
@@ -614,9 +625,9 @@ app = create_app(
 ### RemoteDCClient
 
 `RemoteDCClient` provides a Pythonic async client that mirrors the
-`DCClient` / `AsyncDCClient` interface but communicates over HTTP and
-WebSocket.  Use it to control a DC client running on another machine or
-process:
+`AsyncDCClient` interface but communicates over HTTP and
+WebSocket.  Both implement `DCClientProtocol`, so code written against
+the protocol works identically with either backend:
 
 ```python
 from eiskaltdcpp.api.client import RemoteDCClient
@@ -631,18 +642,41 @@ async def main():
         await client.connect("dchub://hub.example.com:411")
 
         # List hubs
-        hubs = await client.list_hubs_async()
+        hubs = await client.list_hubs()
         for h in hubs:
             print(h.url, h.name, h.user_count)
 
         # Search
-        await client.search_async("ubuntu iso")
-        results = await client.get_search_results_async()
+        await client.search("ubuntu iso")
+        results = await client.get_search_results()
 
         # Real-time events
         async for event, data in client.events("chat,hubs"):
             print(event, data)
 ```
+
+### DCClientProtocol — unified interface
+
+`DCClientProtocol` is a `runtime_checkable` `Protocol` that defines the
+complete async API shared by `AsyncDCClient` and `RemoteDCClient`.  Write
+your application logic against it and swap backends freely:
+
+```python
+from eiskaltdcpp import DCClientProtocol
+
+async def show_users(client: DCClientProtocol, hub: str):
+    """Works with AsyncDCClient *or* RemoteDCClient."""
+    users = await client.get_users(hub)
+    for u in users:
+        print(f"  {u.nick}  {u.share_size / 1e9:.1f} GB")
+
+    hubs = await client.list_hubs()
+    for h in hubs:
+        print(f"  {h.url}  —  {h.name}")
+```
+
+The protocol covers: hub connections, chat, users, search, download queue,
+sharing, settings, transfers, hashing, Lua scripting, and event handlers.
 
 See [`examples/remote_client.py`](examples/remote_client.py) for a complete
 runnable script.
@@ -1113,17 +1147,18 @@ eiskaltdcpp-py/
 │   └── dc_core.i               # Master SWIG interface file
 ├── python/
 │   └── eiskaltdcpp/
-│       ├── __init__.py         # Package init
+│       ├── __init__.py         # Package init (exports DCClientProtocol)
 │       ├── exceptions.py       # Typed Lua exception hierarchy
-│       ├── dc_client.py        # High-level Python wrapper
-│       ├── async_client.py     # Async wrapper
+│       ├── protocol.py         # DCClientProtocol — unified async interface
+│       ├── dc_client.py        # High-level Python wrapper (sync)
+│       ├── async_client.py     # Async wrapper (implements DCClientProtocol)
 │       ├── cli.py              # Unified Click CLI (daemon/api/up/stop/status)
 │       └── api/
 │           ├── __init__.py     # create_app() factory
 │           ├── __main__.py     # CLI: python -m eiskaltdcpp.api
 │           ├── app.py          # FastAPI application factory
 │           ├── auth.py         # JWT + bcrypt + user store
-│           ├── client.py       # RemoteDCClient (HTTP/WS)
+│           ├── client.py       # RemoteDCClient (implements DCClientProtocol)
 │           ├── dashboard.py    # Single-page web dashboard
 │           ├── dependencies.py # FastAPI DI configuration
 │           ├── models.py       # Pydantic request/response schemas
@@ -1155,7 +1190,7 @@ eiskaltdcpp-py/
 ## Releasing to PyPI
 
 This project uses [cibuildwheel](https://cibuildwheel.pypa.io/) to build
-manylinux wheels and [PyPI trusted publishing](https://docs.pypi.org/trusted-publishers/)
+wheels for Linux, macOS, and Windows, and [PyPI trusted publishing](https://docs.pypi.org/trusted-publishers/)
 (OIDC) for upload — no API tokens needed.
 
 ### Steps
@@ -1168,7 +1203,10 @@ manylinux wheels and [PyPI trusted publishing](https://docs.pypi.org/trusted-pub
    git push origin v2.4.3
    ```
 4. The `Wheels` workflow automatically:
-   - Builds manylinux wheels for CPython 3.10–3.13 (x86_64)
+   - Builds wheels for CPython 3.10–3.13:
+     - Linux x86_64 (manylinux_2_28)
+     - macOS arm64 + x86_64
+     - Windows AMD64
    - Builds a source distribution
    - Publishes everything to PyPI
 

@@ -292,28 +292,28 @@ class TestHubIntegration:
 
     async def test_connect_and_list(self, client, mock_dc):
         await client.connect("dchub://test-hub:411")
-        hubs = await client.list_hubs_async()
+        hubs = await client.list_hubs()
         assert len(hubs) == 1
         assert isinstance(hubs[0], HubInfo)
         assert hubs[0].url == "dchub://test-hub:411"
 
     async def test_disconnect(self, client, mock_dc):
         await client.connect("dchub://temp:411")
-        hubs = await client.list_hubs_async()
+        hubs = await client.list_hubs()
         assert len(hubs) == 1
 
         await client.disconnect("dchub://temp:411")
-        hubs = await client.list_hubs_async()
+        hubs = await client.list_hubs()
         assert len(hubs) == 0
 
     async def test_is_connected(self, client, mock_dc):
         await client.connect("dchub://check:411")
-        assert await client.is_connected_async("dchub://check:411")
-        assert not await client.is_connected_async("dchub://nope:411")
+        assert await client.is_connected("dchub://check:411")
+        assert not await client.is_connected("dchub://nope:411")
 
     async def test_list_users_empty(self, client, mock_dc):
         await client.connect("dchub://empty:411")
-        users = await client.get_users_async("dchub://empty:411")
+        users = await client.get_users("dchub://empty:411")
         assert users == []
 
     async def test_list_users_populated(self, client, mock_dc):
@@ -325,7 +325,7 @@ class TestHubIntegration:
             {"nick": "Bob", "shareSize": 200, "description": "",
              "tag": "", "connection": "", "email": "", "hubUrl": hub},
         ]
-        users = await client.get_users_async(hub)
+        users = await client.get_users(hub)
         assert len(users) == 2
         assert isinstance(users[0], UserInfo)
         nicks = {u.nick for u in users}
@@ -342,10 +342,10 @@ class TestChatIntegration:
     async def test_send_and_get_history(self, client, mock_dc):
         hub = "dchub://chat-hub:411"
         await client.connect(hub)
-        await client.send_message_async(hub, "Hello world!")
-        await client.send_message_async(hub, "Second message")
+        await client.send_message(hub, "Hello world!")
+        await client.send_message(hub, "Second message")
 
-        history = await client.get_chat_history_async(hub)
+        history = await client.get_chat_history(hub)
         assert "Hello world!" in history
         assert "Second message" in history
 
@@ -353,7 +353,7 @@ class TestChatIntegration:
         hub = "dchub://pm-hub:411"
         await client.connect(hub)
         # Should not raise
-        await client.send_pm_async(hub, "SomeUser", "Private hello")
+        await client.send_pm(hub, "SomeUser", "Private hello")
 
 
 # ============================================================================
@@ -367,22 +367,22 @@ class TestSearchIntegration:
         hub = "dchub://search:411"
         await client.connect(hub)
 
-        ok = await client.search_async("test query")
+        ok = await client.search("test query")
         assert ok is True
 
-        results = await client.get_search_results_async()
+        results = await client.get_search_results()
         assert len(results) >= 1
         assert isinstance(results[0], SearchResultInfo)
         assert "test query" in results[0].file
 
     async def test_clear_results(self, client, mock_dc):
         await client.connect("dchub://sr:411")
-        await client.search_async("something")
-        results = await client.get_search_results_async()
+        await client.search("something")
+        results = await client.get_search_results()
         assert len(results) > 0
 
-        await client.clear_search_results_async()
-        results = await client.get_search_results_async()
+        await client.clear_search_results()
+        results = await client.get_search_results()
         assert len(results) == 0
 
 
@@ -394,47 +394,47 @@ class TestQueueIntegration:
     """Download queue management round-trips."""
 
     async def test_download_and_list(self, client, mock_dc):
-        ok = await client.download_async("/downloads", "file.bin",
+        ok = await client.download("/downloads", "file.bin",
                                          1024, "TTH123")
         assert ok is True
 
-        queue = await client.list_queue_async()
+        queue = await client.list_queue()
         assert len(queue) == 1
         assert isinstance(queue[0], QueueItemInfo)
         assert "file.bin" in queue[0].target
 
     async def test_download_magnet(self, client, mock_dc):
-        ok = await client.download_magnet_async(
+        ok = await client.download_magnet(
             "magnet:?xt=urn:tree:tiger:ABCD&dn=test.bin", "/tmp")
         assert ok is True
-        queue = await client.list_queue_async()
+        queue = await client.list_queue()
         assert len(queue) == 1
 
     async def test_remove_download(self, client, mock_dc):
-        await client.download_async("/dl", "rm.bin", 100, "T1")
-        queue = await client.list_queue_async()
+        await client.download("/dl", "rm.bin", 100, "T1")
+        queue = await client.list_queue()
         target = queue[0].target
         assert len(queue) == 1
 
-        await client.remove_download_async(target)
-        queue = await client.list_queue_async()
+        await client.remove_download(target)
+        queue = await client.list_queue()
         assert len(queue) == 0
 
     async def test_clear_queue(self, client, mock_dc):
-        await client.download_async("/dl", "a.bin", 100, "T1")
-        await client.download_async("/dl", "b.bin", 200, "T2")
-        queue = await client.list_queue_async()
+        await client.download("/dl", "a.bin", 100, "T1")
+        await client.download("/dl", "b.bin", 200, "T2")
+        queue = await client.list_queue()
         assert len(queue) == 2
 
-        await client.clear_queue_async()
-        queue = await client.list_queue_async()
+        await client.clear_queue()
+        queue = await client.list_queue()
         assert len(queue) == 0
 
     async def test_set_priority(self, client, mock_dc):
-        await client.download_async("/dl", "prio.bin", 100, "T1")
-        target = (await client.list_queue_async())[0].target
+        await client.download("/dl", "prio.bin", 100, "T1")
+        target = (await client.list_queue())[0].target
         # Should not raise
-        await client.set_priority_async(target, 5)
+        await client.set_priority(target, 5)
 
 
 # ============================================================================
@@ -445,27 +445,27 @@ class TestShareIntegration:
     """Share directory management round-trips."""
 
     async def test_add_and_list(self, client, mock_dc):
-        ok = await client.add_share_async("/home/user/files", "MyFiles")
+        ok = await client.add_share("/home/user/files", "MyFiles")
         assert ok is True
 
-        shares = await client.list_shares_async()
+        shares = await client.list_shares()
         assert len(shares) == 1
         assert isinstance(shares[0], ShareInfoData)
 
     async def test_remove_share(self, client, mock_dc):
-        await client.add_share_async("/tmp/share1", "Share1")
-        await client.add_share_async("/tmp/share2", "Share2")
-        shares = await client.list_shares_async()
+        await client.add_share("/tmp/share1", "Share1")
+        await client.add_share("/tmp/share2", "Share2")
+        shares = await client.list_shares()
         assert len(shares) == 2
 
-        ok = await client.remove_share_async("/tmp/share1")
+        ok = await client.remove_share("/tmp/share1")
         assert ok is True
-        shares = await client.list_shares_async()
+        shares = await client.list_shares()
         assert len(shares) == 1
 
     async def test_refresh_share(self, client):
         # Should not raise
-        await client.refresh_share_async()
+        await client.refresh_share()
 
     async def test_get_share_size(self, client, mock_dc):
         size = await client.get_share_size()
@@ -484,19 +484,19 @@ class TestSettingsIntegration:
     """Get/set settings, reload, networking."""
 
     async def test_get_setting(self, client, mock_dc):
-        val = await client.get_setting_async("Nick")
+        val = await client.get_setting("Nick")
         assert val == "TestBot"
 
     async def test_set_setting(self, client, mock_dc):
-        await client.set_setting_async("Nick", "NewBot")
-        val = await client.get_setting_async("Nick")
+        await client.set_setting("Nick", "NewBot")
+        val = await client.get_setting("Nick")
         assert val == "NewBot"
 
     async def test_reload_config(self, client):
-        await client.reload_config_async()  # should not raise
+        await client.reload_config()  # should not raise
 
     async def test_start_networking(self, client):
-        await client.start_networking_async()  # should not raise
+        await client.start_networking()  # should not raise
 
 
 # ============================================================================
@@ -518,9 +518,9 @@ class TestTransfersIntegration:
 
     async def test_pause_hashing(self, client, mock_dc):
         assert not mock_dc._hashing_paused
-        await client.pause_hashing_async(True)
+        await client.pause_hashing(True)
         assert mock_dc._hashing_paused
-        await client.pause_hashing_async(False)
+        await client.pause_hashing(False)
         assert not mock_dc._hashing_paused
 
 
@@ -548,7 +548,7 @@ class TestRBACIntegration:
     """Read-only users cannot call write endpoints."""
 
     async def test_readonly_can_list_hubs(self, readonly_client, mock_dc):
-        hubs = await readonly_client.list_hubs_async()
+        hubs = await readonly_client.list_hubs()
         assert isinstance(hubs, list)
 
     async def test_readonly_cannot_connect(self, readonly_client):
@@ -558,7 +558,7 @@ class TestRBACIntegration:
 
     async def test_readonly_cannot_send_chat(self, readonly_client, mock_dc):
         with pytest.raises(httpx.HTTPStatusError) as exc_info:
-            await readonly_client.send_message_async("dchub://x:411", "hi")
+            await readonly_client.send_message("dchub://x:411", "hi")
         assert exc_info.value.response.status_code == 403
 
     async def test_readonly_can_get_status(self, readonly_client):
@@ -626,28 +626,28 @@ class TestFullWorkflow:
 
         # 1. Connect
         await client.connect(hub)
-        hubs = await client.list_hubs_async()
+        hubs = await client.list_hubs()
         assert len(hubs) == 1
 
         # 2. Chat
-        await client.send_message_async(hub, "Hello from integration test!")
-        history = await client.get_chat_history_async(hub)
+        await client.send_message(hub, "Hello from integration test!")
+        history = await client.get_chat_history(hub)
         assert len(history) == 1
 
         # 3. Search
-        ok = await client.search_async("integration test file")
+        ok = await client.search("integration test file")
         assert ok is True
-        results = await client.get_search_results_async()
+        results = await client.get_search_results()
         assert len(results) >= 1
 
         # 4. Queue a download
-        ok = await client.download_async("/tmp/dl", "test.bin", 9999, "TTH0")
+        ok = await client.download("/tmp/dl", "test.bin", 9999, "TTH0")
         assert ok is True
-        queue = await client.list_queue_async()
+        queue = await client.list_queue()
         assert len(queue) == 1
 
         # 5. Add a share
-        ok = await client.add_share_async("/data/shared", "Shared")
+        ok = await client.add_share("/data/shared", "Shared")
         assert ok is True
 
         # 6. Check status
@@ -655,11 +655,11 @@ class TestFullWorkflow:
         assert status.get("initialized") is True
 
         # 7. Clean up
-        await client.clear_queue_async()
-        await client.clear_search_results_async()
+        await client.clear_queue()
+        await client.clear_search_results()
         await client.disconnect(hub)
 
-        hubs = await client.list_hubs_async()
+        hubs = await client.list_hubs()
         assert len(hubs) == 0
-        queue = await client.list_queue_async()
+        queue = await client.list_queue()
         assert len(queue) == 0

@@ -22,19 +22,21 @@ from eiskaltdcpp.exceptions import (  # noqa: F401
     LuaSymbolError,
 )
 
+from eiskaltdcpp.protocol import DCClientProtocol  # noqa: F401
+
 # Import high-level wrapper when SWIG module is available
 try:
     from eiskaltdcpp.dc_client import DCClient
     from eiskaltdcpp.async_client import AsyncDCClient
     __all__ = [
-        "DCClient", "AsyncDCClient", "__version__",
+        "DCClient", "AsyncDCClient", "DCClientProtocol", "__version__",
         "LuaError", "LuaNotAvailableError", "LuaSymbolError",
         "LuaLoadError", "LuaRuntimeError",
     ]
 except ImportError:
     # SWIG module not yet built — only version available
     __all__ = [
-        "__version__",
+        "DCClientProtocol", "__version__",
         "LuaError", "LuaNotAvailableError", "LuaSymbolError",
         "LuaLoadError", "LuaRuntimeError",
     ]
