@@ -89,6 +89,9 @@ add_custom_command(TARGET dc_core POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/protocol.py
         ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/protocol.py
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/hub_aliases.py
+        ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/hub_aliases.py
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/api
         ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/api
