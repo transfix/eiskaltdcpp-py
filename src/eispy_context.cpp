@@ -176,6 +176,97 @@ EisPyContext::~EisPyContext() {
 // Lifecycle
 // =========================================================================
 
+// =========================================================================
+// Private: resolve and create the configuration directory
+// =========================================================================
+
+std::string EisPyContext::resolveConfigDir(const std::string& configDir) {
+    std::string cfgDir = configDir;
+    if (cfgDir.empty()) {
+        const char* home = getenv("HOME");
+        if (home) {
+            cfgDir = std::string(home) + "/.eiskaltdcpp-py/";
+        } else {
+#ifdef _WIN32
+            const char* appdata = getenv("LOCALAPPDATA");
+            if (appdata)
+                cfgDir = std::string(appdata) + "\\eiskaltdcpp-py\\";
+            else
+                cfgDir = "C:\\Temp\\.eiskaltdcpp-py\\";
+#else
+            cfgDir = "/tmp/.eiskaltdcpp-py/";
+#endif
+        }
+    }
+
+    if (!cfgDir.empty() && cfgDir.back() != '/' && cfgDir.back() != '\\') {
+        cfgDir += '/';
+    }
+    return cfgDir;
+}
+
+// =========================================================================
+// Private: apply default settings after startup
+// =========================================================================
+
+void EisPyContext::applyDefaults(const std::string& cfgDir) {
+    // Ensure a nick is set
+    {
+        auto* sm = m_context->getSettingsManager();
+        std::string currentNick = sm->get(SettingsManager::NICK, true);
+        if (currentNick.empty()) {
+            std::string defaultNick = "eispy-" + std::to_string(getpid());
+            sm->set(SettingsManager::NICK, defaultNick);
+        }
+    }
+
+    // Set a default description
+    {
+        auto* sm = m_context->getSettingsManager();
+        std::string currentDesc = sm->get(SettingsManager::DESCRIPTION, true);
+        if (currentDesc.empty()) {
+            std::string user, host;
+#ifdef _WIN32
+            char nameBuf[256];
+            DWORD nameSz = sizeof(nameBuf);
+            if (GetUserNameA(nameBuf, &nameSz))
+                user = nameBuf;
+            nameSz = sizeof(nameBuf);
+            if (GetComputerNameA(nameBuf, &nameSz))
+                host = nameBuf;
+#else
+            if (auto* pw = getpwuid(getuid()))
+                user = pw->pw_name;
+            char hostBuf[256];
+            if (gethostname(hostBuf, sizeof(hostBuf)) == 0) {
+                hostBuf[sizeof(hostBuf) - 1] = '\0';
+                host = hostBuf;
+            }
+#endif
+            if (!user.empty() && !host.empty())
+                sm->set(SettingsManager::DESCRIPTION, user + "@" + host);
+            else if (!user.empty())
+                sm->set(SettingsManager::DESCRIPTION, user);
+        }
+    }
+
+    // Ensure a download directory is set.
+    // On Windows, Util::initialize() may leave PATH_DOWNLOADS empty
+    // (the default-path code is inside a non-Windows #else branch in
+    // dcpp/Util.cpp).  Fall back to the config directory itself.
+    {
+        auto* sm = m_context->getSettingsManager();
+        std::string dlDir = sm->get(SettingsManager::DOWNLOAD_DIRECTORY, true);
+        if (dlDir.empty()) {
+            sm->set(SettingsManager::DOWNLOAD_DIRECTORY, cfgDir + "Downloads/");
+        }
+    }
+}
+
+// =========================================================================
+// Lifecycle
+// =========================================================================
+
 bool EisPyContext::initialize(const std::string& configDir) {
     if (m_initialized.load()) {
         return true;
@@ -183,20 +274,7 @@ bool EisPyContext::initialize(const std::string& configDir) {
 
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    std::string cfgDir = configDir;
-    if (cfgDir.empty()) {
-        const char* home = getenv("HOME");
-        if (home) {
-            cfgDir = std::string(home) + "/.eiskaltdcpp-py/";
-        } else {
-            cfgDir = "/tmp/.eiskaltdcpp-py/";
-        }
-    }
-
-    if (!cfgDir.empty() && cfgDir.back() != '/') {
-        cfgDir += '/';
-    }
-
+    std::string cfgDir = resolveConfigDir(configDir);
     m_configDir = cfgDir;
 
     try {
@@ -217,72 +295,58 @@ bool EisPyContext::initialize(const std::string& configDir) {
             Util::initialize(pathOverrides);
 
             g_dcppContext = dcpp::startup(startupCallback, nullptr).release();
-
-            // Ensure a nick is set
-            {
-                auto* sm = dcpp::getContext()->getSettingsManager();
-                std::string currentNick = sm->get(SettingsManager::NICK, true);
-                if (currentNick.empty()) {
-                    std::string defaultNick = "eispy-" + std::to_string(getpid());
-                    sm->set(SettingsManager::NICK, defaultNick);
-                }
-            }
-
-            // Set a default description
-            {
-                auto* sm = dcpp::getContext()->getSettingsManager();
-                std::string currentDesc = sm->get(SettingsManager::DESCRIPTION, true);
-                if (currentDesc.empty()) {
-                    std::string user, host;
-#ifdef _WIN32
-                    char nameBuf[256];
-                    DWORD nameSz = sizeof(nameBuf);
-                    if (GetUserNameA(nameBuf, &nameSz))
-                        user = nameBuf;
-                    nameSz = sizeof(nameBuf);
-                    if (GetComputerNameA(nameBuf, &nameSz))
-                        host = nameBuf;
-#else
-                    if (auto* pw = getpwuid(getuid()))
-                        user = pw->pw_name;
-                    char hostBuf[256];
-                    if (gethostname(hostBuf, sizeof(hostBuf)) == 0) {
-                        hostBuf[sizeof(hostBuf) - 1] = '\0';
-                        host = hostBuf;
-                    }
-#endif
-                    if (!user.empty() && !host.empty())
-                        sm->set(SettingsManager::DESCRIPTION, user + "@" + host);
-                    else if (!user.empty())
-                        sm->set(SettingsManager::DESCRIPTION, user);
-                }
-            }
-
-            // Ensure a download directory is set.
-            // On Windows, Util::initialize() may leave PATH_DOWNLOADS empty
-            // (the default-path code is inside a non-Windows #else branch in
-            // dcpp/Util.cpp).  Fall back to the config directory itself.
-            {
-                auto* sm = dcpp::getContext()->getSettingsManager();
-                std::string dlDir = sm->get(SettingsManager::DOWNLOAD_DIRECTORY, true);
-                if (dlDir.empty()) {
-                    sm->set(SettingsManager::DOWNLOAD_DIRECTORY, cfgDir + "Downloads/");
-                }
-            }
-
-            initLuaScriptingIfPresent();
-        }
-
-        if (!g_dcppTimerStarted) {
-            dcpp::getContext()->getTimerManager()->start();
-            g_dcppTimerStarted = true;
         }
 
         m_context = g_dcppContext;
+
+        if (!g_dcppTimerStarted) {
+            applyDefaults(cfgDir);
+            initLuaScriptingIfPresent();
+            dcpp::getContext()->getTimerManager()->start();
+            g_dcppTimerStarted = true;
+        }
     }
 
     m_listeners = std::make_unique<BridgeListeners>(*this);
     m_listeners->subscribeGlobal();
+
+    m_initialized.store(true);
+    return true;
+}
+
+bool EisPyContext::initializeMinimal(const std::string& configDir) {
+    if (m_initialized.load()) {
+        return true;
+    }
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    std::string cfgDir = resolveConfigDir(configDir);
+    m_configDir = cfgDir;
+
+    try {
+        std::filesystem::create_directories(cfgDir);
+    } catch (const std::exception& e) {
+        return false;
+    }
+
+    // Ensure Util paths are set (first caller wins via s_utilInitDone guard).
+    {
+        std::lock_guard<std::mutex> glock(g_dcppMutex);
+        Util::PathsMap pathOverrides;
+        pathOverrides[Util::PATH_USER_CONFIG] = cfgDir;
+        pathOverrides[Util::PATH_USER_LOCAL] = cfgDir;
+        Util::initialize(pathOverrides);
+    }
+
+    // Create a private (non-global) DCContext in minimal mode.
+    // This avoids poisoning the global singleton that full initialize()
+    // depends on for later tests / production use.
+    m_ownedContext = std::make_unique<dcpp::DCContext>();
+    m_ownedContext->startupMinimal();
+    m_context = m_ownedContext.get();
+
+    applyDefaults(cfgDir);
 
     m_initialized.store(true);
     return true;
@@ -294,7 +358,7 @@ void EisPyContext::shutdown() {
     }
 
     // Detach per-hub listeners FIRST
-    {
+    if (m_listeners) {
         std::lock_guard<std::mutex> lock(m_mutex);
         for (auto& [url, data] : m_hubs) {
             if (data.client) {
@@ -303,8 +367,10 @@ void EisPyContext::shutdown() {
         }
     }
 
-    m_listeners->unsubscribeGlobal();
-    m_listeners->setCallback(nullptr);
+    if (m_listeners) {
+        m_listeners->unsubscribeGlobal();
+        m_listeners->setCallback(nullptr);
+    }
 
     std::vector<Client*> clients;
     {
@@ -331,7 +397,14 @@ void EisPyContext::shutdown() {
     m_listeners.reset();
     m_context = nullptr;
 
-    // Note: we intentionally do NOT call DCContext::shutdown() here.
+    // If this instance owns a minimal DCContext, shut it down and release.
+    if (m_ownedContext) {
+        m_ownedContext->shutdown();
+        m_ownedContext.reset();
+    }
+
+    // Note: we intentionally do NOT call DCContext::shutdown() on the
+    // global singleton.
     // The dcpp core is a permanent singleton that lives for the process
     // lifetime.  Calling DCContext::shutdown() destroys all managers
     // and calls Util::uninitialize(), after which dcpp::startup()

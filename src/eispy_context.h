@@ -127,14 +127,22 @@ public:
     // Lifecycle
     // =====================================================================
 
-    /// Initialize the DC core library.
+    /// Initialize the DC core library (full startup: network, TLS, threads).
     bool initialize(const std::string& configDir = "");
+
+    /// Lightweight initialization: only settings, resources, and logging.
+    /// No TLS, no background threads, no network.  Intended for unit tests
+    /// and tools that only read/write settings.
+    bool initializeMinimal(const std::string& configDir = "");
 
     /// Shut down cleanly — disconnects all hubs, saves state.
     void shutdown();
 
     /// Whether initialize() has been called successfully.
     bool isInitialized() const;
+
+    /// Access the underlying DCContext (may be global or per-instance).
+    dcpp::DCContext* getDCContext() const { return m_context; }
 
     // =====================================================================
     // Callbacks
@@ -298,6 +306,7 @@ private:
     // State
     std::atomic<bool> m_initialized{false};
     dcpp::DCContext* m_context = nullptr;  // non-owning; shared global
+    std::unique_ptr<dcpp::DCContext> m_ownedContext;  // owned by this instance (minimal mode)
     DCClientCallback* m_callback = nullptr;
     mutable std::mutex m_mutex;
     std::string m_configDir;
@@ -314,6 +323,10 @@ private:
     // Internal helpers
     HubData* findHub(const std::string& url);
     dcpp::Client* findClient(const std::string& url);
+
+    // Shared initialization helpers
+    static std::string resolveConfigDir(const std::string& configDir);
+    void applyDefaults(const std::string& cfgDir);
 
     // Maximum chat history lines per hub
     static const size_t MAX_CHAT_LINES = 100;

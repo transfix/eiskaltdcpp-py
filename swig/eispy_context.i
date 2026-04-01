@@ -23,10 +23,9 @@ using eiskaltdcpp_py::EisPyContext;
 
 // Extend EisPyContext with a context accessor for direct manager access
 %extend eiskaltdcpp_py::EisPyContext {
-    // Return the raw DCContext* for direct manager access
+    // Return the DCContext* for direct manager access
     dcpp::DCContext* getContext() {
-        // EisPyContext owns a unique_ptr<DCContext> m_context
-        return dcpp::getContext();
+        return $self->getDCContext();
     }
 
     %pythoncode %{

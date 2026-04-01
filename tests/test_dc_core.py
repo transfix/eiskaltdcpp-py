@@ -188,7 +188,7 @@ class TestBridgeSettings:
         """Create a single context for all settings tests."""
         cfg = tmp_path_factory.mktemp("dc-settings-tests")
         b = dc_core.EisPyContext()
-        ok = b.initialize(str(cfg) + "/")
+        ok = b.initializeMinimal(str(cfg) + "/")
         assert ok, "Context initialization failed"
         yield b
         b.shutdown()
