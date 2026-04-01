@@ -48,6 +48,13 @@ set_target_properties(dc_core PROPERTIES
     PREFIX ""
     OUTPUT_NAME "_dc_core"
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/eiskaltdcpp"
+    # On Windows, .pyd (DLL) goes to RUNTIME_OUTPUT_DIRECTORY
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/eiskaltdcpp"
+    # Suppress per-config subdirs (Release/, Debug/) for multi-config generators
+    LIBRARY_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/python/eiskaltdcpp"
+    LIBRARY_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/python/eiskaltdcpp"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/python/eiskaltdcpp"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/python/eiskaltdcpp"
 )
 
 # Platform-specific suffix
@@ -79,6 +86,9 @@ add_custom_command(TARGET dc_core POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/exceptions.py
         ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/exceptions.py
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/protocol.py
+        ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/protocol.py
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/api
         ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/api
