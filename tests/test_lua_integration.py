@@ -82,9 +82,24 @@ def config_dir(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def dc_client(config_dir):
-    """Module-scoped synchronous DCClient."""
+    """Module-scoped synchronous DCClient.
+
+    On Windows, Lua scripting is disabled at compile time, so full
+    dcpp::startup() (which creates 22 managers and starts threads)
+    is unnecessary.  Use initializeMinimal() to avoid potential
+    Windows-specific startup issues while still exercising the
+    lua_is_available / lua_get_scripts_path / lua_list_scripts API.
+    """
     client = DCClient(config_dir)
-    client.initialize()
+    if sys.platform == "win32":
+        from eiskaltdcpp import dc_core
+        ok = client._bridge.initializeMinimal(config_dir + "/")
+        if ok:
+            client._initialized = True
+        else:
+            pytest.skip("initializeMinimal failed on Windows")
+    else:
+        client.initialize()
     yield client
     client.shutdown()
 

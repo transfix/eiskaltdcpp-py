@@ -294,7 +294,15 @@ bool EisPyContext::initialize(const std::string& configDir) {
             pathOverrides[Util::PATH_USER_LOCAL] = cfgDir;
             Util::initialize(pathOverrides);
 
-            g_dcppContext = dcpp::startup(startupCallback, nullptr).release();
+            try {
+                g_dcppContext = dcpp::startup(startupCallback, nullptr).release();
+            } catch (const std::exception& e) {
+                throw std::runtime_error(
+                    std::string("dcpp::startup() failed: ") + e.what());
+            } catch (...) {
+                throw std::runtime_error(
+                    "dcpp::startup() failed with unknown exception");
+            }
         }
 
         m_context = g_dcppContext;
@@ -302,7 +310,12 @@ bool EisPyContext::initialize(const std::string& configDir) {
         if (!g_dcppTimerStarted) {
             applyDefaults(cfgDir);
             initLuaScriptingIfPresent();
-            dcpp::getContext()->getTimerManager()->start();
+            try {
+                dcpp::getContext()->getTimerManager()->start();
+            } catch (const std::exception& e) {
+                throw std::runtime_error(
+                    std::string("TimerManager::start() failed: ") + e.what());
+            }
             g_dcppTimerStarted = true;
         }
     }

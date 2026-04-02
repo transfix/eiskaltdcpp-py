@@ -184,7 +184,7 @@ jobs:
           # causes a hard crash inside dcpp::startup() → bindtextdomain().
           $env:PATH = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin;$($env:PATH -replace 'C:\\msys64\\usr\\bin;?','')"
           $env:PYTHONPATH = "build/python"
-          python -m pytest tests/ -v --tb=short `
+          python -m pytest tests/ -v --tb=long `
             --ignore=tests/test_integration.py
 
       - name: Compute artifact name

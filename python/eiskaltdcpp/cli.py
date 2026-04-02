@@ -936,7 +936,17 @@ def _get_client(ctx: click.Context):
 
 
 def _run(coro):
-    """Run an async coroutine in a new event loop."""
+    """Run an async coroutine in a new event loop.
+
+    On Windows, explicitly use SelectorEventLoop to avoid
+    ProactorEventLoop cleanup issues (ResourceWarning / RuntimeError).
+    """
+    if sys.platform == "win32":
+        loop = asyncio.SelectorEventLoop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
     return asyncio.run(coro)
 
 

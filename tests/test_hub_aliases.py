@@ -251,7 +251,10 @@ class TestCLIAliasResolution:
         with patch("eiskaltdcpp.cli._get_client", return_value=mock_client):
             result = runner.invoke(cli, ["hub", "connect", "winter"])
 
-        assert result.exit_code == 0
+        assert result.exit_code == 0, (
+            f"exit_code={result.exit_code}, output={result.output!r}, "
+            f"exception={result.exception!r}"
+        )
         mock_client.connect.assert_called_once_with(
             "nmdcs://wintermute:411", "",
         )
@@ -269,7 +272,10 @@ class TestCLIAliasResolution:
                 "hub", "connect", "nmdcs://direct:411",
             ])
 
-        assert result.exit_code == 0
+        assert result.exit_code == 0, (
+            f"exit_code={result.exit_code}, output={result.output!r}, "
+            f"exception={result.exception!r}"
+        )
         mock_client.connect.assert_called_once_with("nmdcs://direct:411", "")
 
     def test_hub_connect_unknown_alias_fails(self, alias_file, runner):
