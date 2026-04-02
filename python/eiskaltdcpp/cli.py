@@ -139,6 +139,31 @@ def _write_pid(pid_file: str, pid: int) -> None:
     atexit.register(lambda: path.unlink(missing_ok=True))
 
 
+def _is_process_alive(pid: int) -> bool:
+    """Return *True* if *pid* refers to a running process (Windows-safe).
+
+    On Windows ``os.kill(pid, 0)`` sends ``CTRL_C_EVENT`` which can kill
+    the *calling* process.  Use ``OpenProcess`` instead.
+    """
+    try:
+        if sys.platform == "win32":
+            import ctypes
+            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = kernel32.OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION, False, pid,
+            )
+            if not handle:
+                return False
+            kernel32.CloseHandle(handle)
+            return True
+        else:
+            os.kill(pid, 0)
+            return True
+    except OSError:
+        return False
+
+
 def _read_pid(pid_file: str) -> Optional[int]:
     """Read a PID from a file. Returns None if missing or stale."""
     path = Path(pid_file)
@@ -149,24 +174,10 @@ def _read_pid(pid_file: str) -> Optional[int]:
     except (ValueError, OSError):
         path.unlink(missing_ok=True)
         return None
-    # Check whether the process is still running.
-    # On Windows os.kill(pid, 0) sends CTRL_C_EVENT (signal 0 == Ctrl+C)
-    # which can kill the *calling* process.  Use OpenProcess instead.
-    try:
-        if sys.platform == "win32":
-            import ctypes
-            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-            if not handle:
-                raise OSError("process not found")
-            kernel32.CloseHandle(handle)
-        else:
-            os.kill(pid, 0)
+    if _is_process_alive(pid):
         return pid
-    except OSError:
-        path.unlink(missing_ok=True)
-        return None
+    path.unlink(missing_ok=True)
+    return None
 
 
 def _daemonise(log_file: str, pid_file: str) -> None:
@@ -690,14 +701,12 @@ def stop(pid_file):
         # Wait a moment for clean shutdown
         for _ in range(30):
             time.sleep(0.1)
-            try:
-                os.kill(pid, 0)
-            except OSError:
+            if not _is_process_alive(pid):
                 click.echo("Process stopped.")
                 Path(pid_file).unlink(missing_ok=True)
                 return
         click.echo("Process did not stop within 3s — sending SIGKILL")
-        os.kill(pid, signal.SIGKILL)
+        os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
         Path(pid_file).unlink(missing_ok=True)
     except ProcessLookupError:
         click.echo("Process already gone.")

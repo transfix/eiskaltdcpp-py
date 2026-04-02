@@ -240,23 +240,15 @@ class TestStopCommand:
         assert result.exit_code != 0
         assert "No running process" in result.output
 
+    @patch("eiskaltdcpp.cli._is_process_alive")
     @patch("os.kill")
-    def test_stop_running_process(self, mock_kill, runner, tmp_path):
+    def test_stop_running_process(self, mock_kill, mock_alive, runner, tmp_path):
         pid_file = tmp_path / "test.pid"
         pid_file.write_text("12345")
 
-        # kill(pid, 0) for alive check → success
-        # kill(pid, SIGTERM) → success
-        # kill(pid, 0) second call → process gone
-        call_count = 0
-        
-        def side_effect(pid, sig):
-            nonlocal call_count
-            call_count += 1
-            if sig == 0 and call_count > 2:
-                raise OSError("No such process")
-
-        mock_kill.side_effect = side_effect
+        # _is_process_alive: True for _read_pid(), then False after SIGTERM
+        alive_calls = iter([True, False])
+        mock_alive.side_effect = lambda pid: next(alive_calls, False)
 
         result = runner.invoke(cli, ["stop", "--pid-file", str(pid_file)])
         assert "SIGTERM" in result.output or "stopped" in result.output.lower()
