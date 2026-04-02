@@ -83,11 +83,6 @@ def config_dir(tmp_path_factory):
 @pytest.fixture(scope="module")
 def dc_client(config_dir):
     """Module-scoped synchronous DCClient."""
-    if sys.platform == "win32":
-        pytest.skip(
-            "Full dcpp::startup() crashes on Windows CI — "
-            "lua integration tests require Unix"
-        )
     client = DCClient(config_dir)
     client.initialize()
     yield client

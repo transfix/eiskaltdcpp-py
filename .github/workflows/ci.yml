@@ -173,10 +173,16 @@ jobs:
 
       - name: Run tests (CTest)
         working-directory: build
-        run: ctest --output-on-failure
+        run: |
+          $env:PATH = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin;$($env:PATH -replace 'C:\\msys64\\usr\\bin;?','')"
+          ctest --output-on-failure
 
       - name: Run tests (pytest direct)
         run: |
+          # Ensure vcpkg DLLs are found before any MSYS2 DLLs (ABI mismatch).
+          # MSYS2's libintl-8.dll (MinGW ABI) shadows vcpkg's (MSVC ABI) and
+          # causes a hard crash inside dcpp::startup() → bindtextdomain().
+          $env:PATH = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin;$($env:PATH -replace 'C:\\msys64\\usr\\bin;?','')"
           $env:PYTHONPATH = "build/python"
           python -m pytest tests/ -v --tb=short `
             --ignore=tests/test_integration.py

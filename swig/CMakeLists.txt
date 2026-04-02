@@ -67,6 +67,39 @@ else()
 endif()
 set_target_properties(dc_core PROPERTIES SUFFIX "${_DC_CORE_SUFFIX}")
 
+# ---------------------------------------------------------------------------
+# Windows: Copy vcpkg runtime DLLs alongside the .pyd
+#
+# _dc_core.pyd statically links libeiskaltdcpp but dynamically links the
+# vcpkg-provided runtime DLLs (OpenSSL, gettext/libintl, zlib, bzip2, etc.).
+# Windows resolves DLLs from the executable (python.exe) directory first,
+# then PATH.  If MSYS2 (MinGW ABI) is on PATH its libintl-8.dll will
+# shadow the vcpkg (MSVC ABI) version, causing a hard crash.
+#
+# Copying the correct DLLs next to the .pyd ensures the loader finds
+# the vcpkg-built versions regardless of PATH ordering.
+# ---------------------------------------------------------------------------
+if(WIN32 AND DEFINED VCPKG_INSTALLED_DIR)
+    set(_VCPKG_BIN_DIR "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin")
+    add_custom_command(TARGET dc_core POST_BUILD
+        COMMAND ${CMAKE_COMMAND}
+            -DSOURCE_DIR=${_VCPKG_BIN_DIR}
+            -DDEST_DIR=$<TARGET_FILE_DIR:dc_core>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/copy_runtime_dlls.cmake
+        COMMENT "Copying vcpkg runtime DLLs alongside _dc_core.pyd"
+    )
+elseif(WIN32 AND DEFINED ENV{VCPKG_INSTALLATION_ROOT})
+    # Classic-mode vcpkg (vcpkg install, not manifest)
+    set(_VCPKG_BIN_DIR "$ENV{VCPKG_INSTALLATION_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/bin")
+    add_custom_command(TARGET dc_core POST_BUILD
+        COMMAND ${CMAKE_COMMAND}
+            -DSOURCE_DIR=${_VCPKG_BIN_DIR}
+            -DDEST_DIR=$<TARGET_FILE_DIR:dc_core>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/copy_runtime_dlls.cmake
+        COMMENT "Copying vcpkg runtime DLLs alongside _dc_core.pyd"
+    )
+endif()
+
 # Ensure the output directory and Python source files exist in build tree
 add_custom_command(TARGET dc_core POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory
