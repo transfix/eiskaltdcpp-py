@@ -243,6 +243,7 @@ class TestCLIAliasResolution:
         """hub connect should resolve an alias to the full URL."""
         add_alias("winter", "nmdcs://wintermute:411")
         from unittest.mock import AsyncMock, patch
+        import sys, traceback as _tb
 
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -250,6 +251,15 @@ class TestCLIAliasResolution:
 
         with patch("eiskaltdcpp.cli._get_client", return_value=mock_client):
             result = runner.invoke(cli, ["hub", "connect", "winter"])
+
+        if result.exit_code != 0:
+            print(f"[DIAG] exit_code={result.exit_code}", file=sys.stderr, flush=True)
+            print(f"[DIAG] output={result.output!r}", file=sys.stderr, flush=True)
+            print(f"[DIAG] exception={result.exception!r}", file=sys.stderr, flush=True)
+            if result.exception:
+                _tb.print_exception(type(result.exception), result.exception,
+                                    result.exception.__traceback__, file=sys.stderr)
+                sys.stderr.flush()
 
         assert result.exit_code == 0, (
             f"exit_code={result.exit_code}, output={result.output!r}, "

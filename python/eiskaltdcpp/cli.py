@@ -938,16 +938,17 @@ def _get_client(ctx: click.Context):
 def _run(coro):
     """Run an async coroutine in a new event loop.
 
-    On Windows, explicitly use SelectorEventLoop to avoid
-    ProactorEventLoop cleanup issues (ResourceWarning / RuntimeError).
+    On Windows, use WindowsSelectorEventLoopPolicy to avoid
+    ProactorEventLoop cleanup issues (ResourceWarning / RuntimeError
+    with pipe transports).
     """
     if sys.platform == "win32":
-        loop = asyncio.SelectorEventLoop()
-        try:
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
-    return asyncio.run(coro)
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    try:
+        return asyncio.run(coro)
+    finally:
+        if sys.platform == "win32":
+            asyncio.set_event_loop_policy(None)
 
 
 def _print_json(data):

@@ -3,10 +3,28 @@ Shared pytest configuration for eiskaltdcpp-py tests.
 """
 from __future__ import annotations
 
+import asyncio
+import sys
 from unittest.mock import patch
 
 import bcrypt
 import pytest
+
+
+def pytest_runtest_logreport(report):
+    """Print failure/error details immediately so they appear in CI logs
+    even if the process crashes before the summary section."""
+    if report.when in ("call", "setup") and report.failed:
+        print(f"\n{'='*60}", file=sys.stderr, flush=True)
+        print(f"IMMEDIATE FAIL: {report.nodeid}", file=sys.stderr, flush=True)
+        print(report.longreprtext, file=sys.stderr, flush=True)
+        print(f"{'='*60}\n", file=sys.stderr, flush=True)
+
+
+def pytest_configure(config):
+    """Use SelectorEventLoop on Windows to avoid ProactorEventLoop issues."""
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # ---------------------------------------------------------------------------
 # Speed up bcrypt for tests.  Default rounds=12 costs ~0.3 s per hash/verify
