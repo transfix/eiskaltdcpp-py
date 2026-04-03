@@ -406,8 +406,8 @@ async def client():
     try:
         ok = await c.initialize(timeout=INIT_TIMEOUT)
         assert ok, "Client failed to initialize"
-        c.set_setting("Nick", NICK)
-        c.set_setting("Description", "eiskaltdcpp-py integration test bot")
+        await c.set_setting("Nick", NICK)
+        await c.set_setting("Description", "eiskaltdcpp-py integration test bot")
         connect_tasks = [
             c.connect(hub, wait=True, timeout=CONNECT_TIMEOUT)
             for hub in HUBS
@@ -644,12 +644,12 @@ class TestHubConnection:
     async def test_client_connected(self, client):
         """Client reports connected to all hubs."""
         for hub in HUBS:
-            assert client.is_connected(hub), f"Not connected to {hub}"
+            assert await client.is_connected(hub), f"Not connected to {hub}"
 
     @pytest.mark.asyncio(loop_scope="module")
     async def test_hub_info_reasonable(self, client):
         """Hub info has non-empty name and at least 1 user (us)."""
-        hubs = client.list_hubs()
+        hubs = await client.list_hubs()
         assert len(hubs) >= len(HUBS)
         for hub_info in hubs:
             assert hub_info.connected, f"{hub_info.url} not connected"
@@ -658,12 +658,12 @@ class TestHubConnection:
             # poll until we see at least ourselves.
             for _ in range(30):
                 refreshed = [
-                    h for h in client.list_hubs() if h.url == hub_info.url
+                    h for h in await client.list_hubs() if h.url == hub_info.url
                 ]
                 if refreshed and refreshed[0].userCount >= 1:
                     break
                 await asyncio.sleep(1)
-            final = [h for h in client.list_hubs() if h.url == hub_info.url]
+            final = [h for h in await client.list_hubs() if h.url == hub_info.url]
             assert final and final[0].userCount >= 1, (
                 f"{hub_info.url}: userCount still 0 after 30s"
             )
@@ -673,7 +673,7 @@ class TestHubConnection:
         """Each hub has a non-empty user list (polls up to 30s)."""
         for hub in HUBS:
             for _ in range(30):
-                users = client.get_users(hub)
+                users = await client.get_users(hub)
                 if len(users) >= 1:
                     break
                 await asyncio.sleep(1)
@@ -687,7 +687,7 @@ class TestHubConnection:
         found = False
         for _ in range(30):
             for hub in HUBS:
-                users = client.get_users(hub)
+                users = await client.get_users(hub)
                 nicks = [u.nick for u in users]
                 if NICK in nicks:
                     found = True
@@ -703,12 +703,12 @@ class TestSettings:
 
     @pytest.mark.asyncio(loop_scope="module")
     async def test_nick_setting_matches(self, client):
-        current = client.get_setting("Nick")
+        current = await client.get_setting("Nick")
         assert current == NICK
 
     @pytest.mark.asyncio(loop_scope="module")
     async def test_description_setting(self, client):
-        desc = client.get_setting("Description")
+        desc = await client.get_setting("Description")
         assert "integration test" in desc.lower()
 
 
@@ -717,7 +717,7 @@ class TestSearch:
 
     @pytest.mark.asyncio(loop_scope="module")
     async def test_search_does_not_crash(self, client):
-        ok = client.search("test", hub_url=HUBS[0])
+        ok = await client.search("test", hub_url=HUBS[0])
         await asyncio.sleep(2)
 
     @pytest.mark.asyncio(loop_scope="module")
@@ -738,11 +738,11 @@ class TestCleanDisconnect:
     @pytest.mark.asyncio(loop_scope="module")
     async def test_disconnect_from_all_hubs(self, client):
         for hub in HUBS:
-            if client.is_connected(hub):
+            if await client.is_connected(hub):
                 await client.disconnect(hub)
         await asyncio.sleep(2)
         for hub in HUBS:
-            assert not client.is_connected(hub)
+            assert not await client.is_connected(hub)
 
 
 # =========================================================================
