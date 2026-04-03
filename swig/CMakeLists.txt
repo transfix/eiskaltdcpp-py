@@ -47,6 +47,7 @@ target_link_libraries(dc_core
 # Without it, cryptoManager_->loadCertificates() calls abort() with
 # "OPENSSL_Uplink: no OPENSSL_Applink".
 if(WIN32)
+    enable_language(C)
     target_sources(dc_core PRIVATE "${EISKALTDCPP_INCLUDE_DIR}/windows/applink.c")
 endif()
 
