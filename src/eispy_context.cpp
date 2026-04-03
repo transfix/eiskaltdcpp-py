@@ -464,16 +464,14 @@ void EisPyContext::connectHub(const std::string& url,
         client->setEncoding(encoding);
     }
 
-    m_listeners->attach(client);
-    client->connect();
-
-    const auto& hubUrl = url;
-    if (hubUrl.compare(0, 6, "adc://") == 0 ||
-        hubUrl.compare(0, 7, "adcs://") == 0)
+    if (url.compare(0, 6, "adc://") == 0 ||
+        url.compare(0, 7, "adcs://") == 0)
         client->setClientId(eispyADCTag);
     else
         client->setClientId(eispyNMDCTag);
 
+    // Create the HubData entry BEFORE connect() so that callbacks
+    // from the socket thread (UserUpdated, etc.) always find the hub.
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         HubData hd;
@@ -481,6 +479,9 @@ void EisPyContext::connectHub(const std::string& url,
         hd.cachedInfo.url = url;
         m_hubs[url] = std::move(hd);
     }
+
+    m_listeners->attach(client);
+    client->connect();
 }
 
 void EisPyContext::disconnectHub(const std::string& url) {
