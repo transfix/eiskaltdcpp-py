@@ -670,16 +670,31 @@ class DCClient:
     # Settings
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _resolve_setting(name: str):
+        """Resolve a setting name to its SettingsManager enum value.
+
+        Tries the name as-is first, then UPPER_CASE (e.g. 'Nick' -> 'NICK',
+        'DownloadDirectory' -> 'DOWNLOAD_DIRECTORY').
+        """
+        attr = getattr(dc_core.SettingsManager, name, None)
+        if attr is not None:
+            return attr
+        # Convert CamelCase / mixedCase to UPPER_SNAKE_CASE
+        import re
+        upper = re.sub(r'(?<=[a-z0-9])(?=[A-Z])', '_', name).upper()
+        return getattr(dc_core.SettingsManager, upper, None)
+
     def get_setting(self, name: str) -> str:
         """Get a DC client setting by name.
 
         Args:
-            name: Setting name (e.g. 'NICK', 'DOWNLOAD_DIRECTORY')
+            name: Setting name (e.g. 'NICK', 'Nick', 'DOWNLOAD_DIRECTORY')
         """
         sm = self.settings
         if not sm:
             return ""
-        attr = getattr(dc_core.SettingsManager, name, None)
+        attr = self._resolve_setting(name)
         if attr is None:
             return ""
         return str(sm.get(attr))
@@ -689,7 +704,7 @@ class DCClient:
         sm = self.settings
         if not sm:
             return
-        attr = getattr(dc_core.SettingsManager, name, None)
+        attr = self._resolve_setting(name)
         if attr is None:
             return
         sm.set(attr, value)
