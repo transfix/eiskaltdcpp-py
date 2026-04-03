@@ -43,14 +43,6 @@ target_link_libraries(dc_core
         Python3::Python
 )
 
-# Windows: OpenSSL DLL requires OPENSSL_Applink defined in the host module.
-# Without it, cryptoManager_->loadCertificates() calls abort() with
-# "OPENSSL_Uplink: no OPENSSL_Applink".
-if(WIN32)
-    enable_language(C)
-    target_sources(dc_core PRIVATE "${EISKALTDCPP_INCLUDE_DIR}/windows/applink.c")
-endif()
-
 # Set output name: _dc_core.so (SWIG convention: underscore prefix)
 set_target_properties(dc_core PROPERTIES
     PREFIX ""
