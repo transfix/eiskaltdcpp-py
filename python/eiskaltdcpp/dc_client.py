@@ -685,6 +685,21 @@ class DCClient:
         upper = re.sub(r'(?<=[a-z0-9])(?=[A-Z])', '_', name).upper()
         return getattr(dc_core.SettingsManager, upper, None)
 
+    @staticmethod
+    def _setting_type(attr: int) -> str:
+        """Return 'str', 'int', 'int64', or 'float' for a setting enum value.
+
+        Uses the SettingsManager boundary constants to determine the type.
+        """
+        SM = dc_core.SettingsManager
+        if attr < SM.INT_FIRST:
+            return "str"
+        if attr < SM.INT64_FIRST:
+            return "int"
+        if attr < SM.FLOAT_FIRST:
+            return "int64"
+        return "float"
+
     def get_setting(self, name: str) -> str:
         """Get a DC client setting by name.
 
@@ -697,7 +712,16 @@ class DCClient:
         attr = self._resolve_setting(name)
         if attr is None:
             return ""
-        return str(sm.get(attr))
+        # Use typed getters to avoid SWIG overload ambiguity (all enum
+        # types are plain ints in Python, so the first overload always wins).
+        stype = self._setting_type(attr)
+        if stype == "int":
+            return str(sm.getInt(attr))
+        elif stype == "int64":
+            return str(sm.getInt64(attr))
+        elif stype == "float":
+            return str(sm.getFloat(attr))
+        return sm.getStr(attr)
 
     def set_setting(self, name: str, value: str) -> None:
         """Set a DC client setting."""
@@ -707,7 +731,17 @@ class DCClient:
         attr = self._resolve_setting(name)
         if attr is None:
             return
-        sm.set(attr, value)
+        # Use typed setters to avoid SWIG overload ambiguity — see
+        # get_setting() for rationale.
+        stype = self._setting_type(attr)
+        if stype == "int":
+            sm.setInt(attr, int(value))
+        elif stype == "int64":
+            sm.setInt64(attr, int(value))
+        elif stype == "float":
+            sm.setFloat(attr, float(value))
+        else:
+            sm.setStr(attr, value)
 
     def start_networking(self) -> None:
         """(Re)start the networking stack (connection listeners).

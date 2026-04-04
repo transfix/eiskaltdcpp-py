@@ -158,40 +158,78 @@ public:
         return "SettingsManager()";
     }
 
+    // Typed getters/setters — bypass SWIG overload ambiguity.
+    // SWIG cannot distinguish StrSetting/IntSetting/etc. (all enums are
+    // plain ints in Python), so overloaded get()/set() always dispatch to
+    // the first matching overload (StrSetting).  These explicitly cast the
+    // key to the correct enum type.
+    std::string getStr(int key, bool useDefault = true) const {
+        return $self->get(
+            static_cast<dcpp::SettingsManager::StrSetting>(key), useDefault);
+    }
+    int getInt(int key, bool useDefault = true) const {
+        return $self->get(
+            static_cast<dcpp::SettingsManager::IntSetting>(key), useDefault);
+    }
+    int64_t getInt64(int key, bool useDefault = true) const {
+        return $self->get(
+            static_cast<dcpp::SettingsManager::Int64Setting>(key), useDefault);
+    }
+    float getFloat(int key, bool useDefault = true) const {
+        return $self->get(
+            static_cast<dcpp::SettingsManager::FloatSetting>(key), useDefault);
+    }
+    void setStr(int key, const std::string& value) {
+        $self->set(
+            static_cast<dcpp::SettingsManager::StrSetting>(key), value);
+    }
+    void setInt(int key, int value) {
+        $self->set(
+            static_cast<dcpp::SettingsManager::IntSetting>(key), value);
+    }
+    void setInt64(int key, int64_t value) {
+        $self->set(
+            static_cast<dcpp::SettingsManager::Int64Setting>(key), value);
+    }
+    void setFloat(int key, float value) {
+        $self->set(
+            static_cast<dcpp::SettingsManager::FloatSetting>(key), value);
+    }
+
     %pythoncode %{
     @property
     def nick(self):
         """Get the configured nick."""
-        return self.get(SettingsManager.NICK)
+        return self.getStr(SettingsManager.NICK)
 
     @nick.setter
     def nick(self, value):
-        self.set(SettingsManager.NICK, value)
+        self.setStr(SettingsManager.NICK, value)
 
     @property
     def download_directory(self):
         """Get the configured download directory."""
-        return self.get(SettingsManager.DOWNLOAD_DIRECTORY)
+        return self.getStr(SettingsManager.DOWNLOAD_DIRECTORY)
 
     @download_directory.setter
     def download_directory(self, value):
-        self.set(SettingsManager.DOWNLOAD_DIRECTORY, value)
+        self.setStr(SettingsManager.DOWNLOAD_DIRECTORY, value)
 
     @property
     def slots(self):
         """Get the number of upload slots."""
-        return self.get(SettingsManager.SLOTS)
+        return self.getInt(SettingsManager.SLOTS)
 
     @slots.setter
     def slots(self, value):
-        self.set(SettingsManager.SLOTS, value)
+        self.setInt(SettingsManager.SLOTS, value)
 
     @property
     def tcp_port(self):
-        return self.get(SettingsManager.TCP_PORT)
+        return self.getInt(SettingsManager.TCP_PORT)
 
     @tcp_port.setter
     def tcp_port(self, value):
-        self.set(SettingsManager.TCP_PORT, value)
+        self.setInt(SettingsManager.TCP_PORT, value)
     %}
 }

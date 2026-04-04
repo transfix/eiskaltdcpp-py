@@ -1206,6 +1206,7 @@ std::string EisPyContext::getVersion() {
 // =========================================================================
 
 void EisPyContext::startNetworking() {
+    if (!m_initialized.load()) return;
     getContext()->getConnectivityManager()->setup(true);
     getContext()->getClientManager()->infoUpdated();
 }

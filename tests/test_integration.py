@@ -142,13 +142,17 @@ class RemoteDCClient:
                 logger.warning(
                     "[%s] worker stdout EOF, returncode=%s", self.label, rc
                 )
+                # Give stderr drain a moment to finish reading
+                await asyncio.sleep(0.1)
+                stderr_tail = "\n".join(self._stderr_lines[-40:])
                 # Fail any pending futures so callers don't hang
                 for mid, fut in list(self._pending.items()):
                     if not fut.done():
                         fut.set_exception(
                             RuntimeError(
                                 f"[{self.label}] worker died "
-                                f"(returncode={rc})"
+                                f"(returncode={rc})\n"
+                                f"stderr (last 40 lines):\n{stderr_tail}"
                             )
                         )
                 self._pending.clear()
@@ -185,7 +189,7 @@ class RemoteDCClient:
             line = raw.decode(errors="replace").rstrip()
             if line:
                 self._stderr_lines.append(line)
-                logger.info("[%s/stderr] %s", self.label, line)
+                logger.warning("[%s/stderr] %s", self.label, line)
 
     async def _send(self, cmd: str, args: dict | None = None, timeout: float = 120) -> Any:
         """Send a command and wait for the reply."""
