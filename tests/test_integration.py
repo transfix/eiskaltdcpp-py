@@ -559,15 +559,17 @@ async def alice_bob_with_shares():
         # establish direct connections for file list / file transfers.
         # Both run on the same host so they need different TCP/UDP/TLS
         # ports and must advertise 127.0.0.1.
+        # NOTE: Use the actual SettingsManager enum names (UPPER_SNAKE_CASE),
+        # not DC++ GUI names — SWIG exposes the C++ enum identifiers.
         for client_obj, tcp_port in [(alice, "4200"), (bob, "4210")]:
-            await client_obj.set_setting("IncomingConnections", "0")  # Active/Direct
-            await client_obj.set_setting("InPort", tcp_port)           # TCP
-            await client_obj.set_setting("UDPPort", tcp_port)          # UDP
-            await client_obj.set_setting("TLSPort", str(int(tcp_port) + 1))  # TLS
-            await client_obj.set_setting("ExternalIp", "127.0.0.1")
-            await client_obj.set_setting("NoIpOverride", "1")
-            await client_obj.set_setting("AutoDetectIncomingConnection", "0")
-            await client_obj.set_setting("Slots", "3")
+            await client_obj.set_setting("INCOMING_CONNECTIONS", "0")  # Active/Direct
+            await client_obj.set_setting("TCP_PORT", tcp_port)
+            await client_obj.set_setting("UDP_PORT", tcp_port)
+            await client_obj.set_setting("TLS_PORT", str(int(tcp_port) + 1))
+            await client_obj.set_setting("EXTERNAL_IP", "127.0.0.1")
+            await client_obj.set_setting("NO_IP_OVERRIDE", "1")
+            await client_obj.set_setting("AUTO_DETECT_CONNECTION", "0")
+            await client_obj.set_setting("SLOTS", "3")
 
         # Apply the connection settings (opens TCP/UDP listeners)
         await alice.start_networking()
