@@ -177,53 +177,53 @@ public:
     // ClientListener overrides
     // =================================================================
 
-    void on(dcpp::ClientListener::Connecting, dcpp::Client* c) noexcept override {
+    void on(dcpp::ClientListener::Connecting, dcpp::Client* c) override {
         auto cb = getCallback();
         if (cb) cb->onHubConnecting(c->getHubUrl());
     }
 
-    void on(dcpp::ClientListener::Connected, dcpp::Client* c) noexcept override {
+    void on(dcpp::ClientListener::Connected, dcpp::Client* c) override {
         refreshHubCache(c->getHubUrl(), c);
         auto cb = getCallback();
         if (cb) cb->onHubConnected(c->getHubUrl(), c->getHubName());
     }
 
     void on(dcpp::ClientListener::Failed, dcpp::Client* c,
-            const std::string& reason) noexcept override {
+            const std::string& reason) override {
         markHubDisconnected(c->getHubUrl());
         auto cb = getCallback();
         if (cb) cb->onHubDisconnected(c->getHubUrl(), reason);
     }
 
     void on(dcpp::ClientListener::Redirect, dcpp::Client* c,
-            const std::string& newUrl) noexcept override {
+            const std::string& newUrl) override {
         auto cb = getCallback();
         if (cb) cb->onHubRedirect(c->getHubUrl(), newUrl);
     }
 
-    void on(dcpp::ClientListener::GetPassword, dcpp::Client* c) noexcept override {
+    void on(dcpp::ClientListener::GetPassword, dcpp::Client* c) override {
         auto cb = getCallback();
         if (cb) cb->onHubPasswordRequest(c->getHubUrl());
     }
 
-    void on(dcpp::ClientListener::HubUpdated, dcpp::Client* c) noexcept override {
+    void on(dcpp::ClientListener::HubUpdated, dcpp::Client* c) override {
         refreshHubCache(c->getHubUrl(), c);
         auto cb = getCallback();
         if (cb) cb->onHubUpdated(c->getHubUrl(), c->getHubName());
     }
 
-    void on(dcpp::ClientListener::NickTaken, dcpp::Client* c) noexcept override {
+    void on(dcpp::ClientListener::NickTaken, dcpp::Client* c) override {
         auto cb = getCallback();
         if (cb) cb->onNickTaken(c->getHubUrl());
     }
 
-    void on(dcpp::ClientListener::HubFull, dcpp::Client* c) noexcept override {
+    void on(dcpp::ClientListener::HubFull, dcpp::Client* c) override {
         auto cb = getCallback();
         if (cb) cb->onHubFull(c->getHubUrl());
     }
 
     void on(dcpp::ClientListener::Message, dcpp::Client* c,
-            const dcpp::ChatMessage& msg) noexcept override {
+            const dcpp::ChatMessage& msg) override {
         std::string hubUrl = c->getHubUrl();
         std::string nick;
         std::string text = msg.text;
@@ -248,13 +248,13 @@ public:
     }
 
     void on(dcpp::ClientListener::StatusMessage, dcpp::Client* c,
-            const std::string& msg, int flags) noexcept override {
+            const std::string& msg, int flags) override {
         auto cb = getCallback();
         if (cb) cb->onStatusMessage(c->getHubUrl(), msg);
     }
 
     void on(dcpp::ClientListener::UserUpdated, dcpp::Client* c,
-            const dcpp::OnlineUser& ou) noexcept override {
+            const dcpp::OnlineUser& ou) override {
         stashUserUpdate(c->getHubUrl(), ou);
         refreshHubCache(c->getHubUrl(), c);
         auto cb = getCallback();
@@ -262,7 +262,7 @@ public:
     }
 
     void on(dcpp::ClientListener::UsersUpdated, dcpp::Client* c,
-            const dcpp::OnlineUserList& list) noexcept override {
+            const dcpp::OnlineUserList& list) override {
         auto cb = getCallback();
         for (auto& ou : list) {
             stashUserUpdate(c->getHubUrl(), *ou);
@@ -273,7 +273,7 @@ public:
     }
 
     void on(dcpp::ClientListener::UserRemoved, dcpp::Client* c,
-            const dcpp::OnlineUser& ou) noexcept override {
+            const dcpp::OnlineUser& ou) override {
         stashUserRemove(c->getHubUrl(), ou.getIdentity().getNick());
         refreshHubCache(c->getHubUrl(), c);
         auto cb = getCallback();
@@ -281,7 +281,7 @@ public:
     }
 
     void on(dcpp::ClientListener::SearchFlood, dcpp::Client* c,
-            const std::string& msg) noexcept override {
+            const std::string& msg) override {
         auto cb = getCallback();
         if (cb) cb->onStatusMessage(c->getHubUrl(),
                                     "Search flood: " + msg);
@@ -292,7 +292,7 @@ public:
     // =================================================================
 
     void on(dcpp::SearchManagerListener::SR,
-            const dcpp::SearchResultPtr& sr) noexcept override {
+            const dcpp::SearchResultPtr& sr) override {
         auto info = infoFromSearchResult(sr);
 
         // Store result in hub data
@@ -309,7 +309,7 @@ public:
     // =================================================================
 
     void on(dcpp::QueueManagerListener::Added,
-            dcpp::QueueItem* qi) noexcept override {
+            dcpp::QueueItem* qi) override {
         auto cb = getCallback();
         if (cb) {
             cb->onQueueItemAdded(qi->getTarget(), qi->getSize(),
@@ -319,7 +319,7 @@ public:
 
     void on(dcpp::QueueManagerListener::Finished,
             dcpp::QueueItem* qi,
-            const std::string& dir, int64_t speed) noexcept override {
+            const std::string& dir, int64_t speed) override {
         auto cb = getCallback();
         if (cb) {
             cb->onQueueItemFinished(qi->getTarget(), qi->getSize());
@@ -327,7 +327,7 @@ public:
     }
 
     void on(dcpp::QueueManagerListener::Removed,
-            dcpp::QueueItem* qi) noexcept override {
+            dcpp::QueueItem* qi) override {
         auto cb = getCallback();
         if (cb) {
             std::string target = qi->getTarget();
@@ -337,7 +337,7 @@ public:
 
     void on(dcpp::QueueManagerListener::Moved,
             dcpp::QueueItem* qi,
-            const std::string& oldTarget) noexcept override {
+            const std::string& oldTarget) override {
         // Item was moved to a new target path — report as new queue addition
         auto cb = getCallback();
         if (cb) {
@@ -351,7 +351,7 @@ public:
     // =================================================================
 
     void on(dcpp::DownloadManagerListener::Starting,
-            dcpp::Download* dl) noexcept override {
+            dcpp::Download* dl) override {
         auto cb = getCallback();
         if (cb) {
             auto ti = infoFromDownload(dl);
@@ -360,7 +360,7 @@ public:
     }
 
     void on(dcpp::DownloadManagerListener::Complete,
-            dcpp::Download* dl) noexcept override {
+            dcpp::Download* dl) override {
         auto cb = getCallback();
         if (cb) {
             auto ti = infoFromDownload(dl);
@@ -370,7 +370,7 @@ public:
 
     void on(dcpp::DownloadManagerListener::Failed,
             dcpp::Download* dl,
-            const std::string& reason) noexcept override {
+            const std::string& reason) override {
         auto cb = getCallback();
         if (cb) {
             auto ti = infoFromDownload(dl);
@@ -379,7 +379,7 @@ public:
     }
 
     void on(dcpp::DownloadManagerListener::Tick,
-            const dcpp::DownloadList& list) noexcept override {
+            const dcpp::DownloadList& list) override {
         // Periodic download progress — could aggregate or skip for now
     }
 
@@ -388,7 +388,7 @@ public:
     // =================================================================
 
     void on(dcpp::UploadManagerListener::Starting,
-            dcpp::Upload* ul) noexcept override {
+            dcpp::Upload* ul) override {
         auto cb = getCallback();
         if (cb) {
             auto ti = infoFromUpload(ul);
@@ -397,7 +397,7 @@ public:
     }
 
     void on(dcpp::UploadManagerListener::Complete,
-            dcpp::Upload* ul) noexcept override {
+            dcpp::Upload* ul) override {
         auto cb = getCallback();
         if (cb) {
             auto ti = infoFromUpload(ul);
@@ -407,14 +407,14 @@ public:
 
     void on(dcpp::UploadManagerListener::Failed,
             dcpp::Upload* ul,
-            const std::string& reason) noexcept override {
+            const std::string& reason) override {
         // Upload failure — report as status
         auto cb = getCallback();
         if (cb) cb->onStatusMessage("", "Upload failed: " + reason);
     }
 
     void on(dcpp::UploadManagerListener::Tick,
-            const dcpp::UploadList& list) noexcept override {
+            const dcpp::UploadList& list) override {
         // Periodic upload progress — could aggregate or skip for now
     }
 
@@ -423,7 +423,7 @@ public:
     // =================================================================
 
     void on(dcpp::TimerManagerListener::Second,
-            uint64_t tick) noexcept override {
+            uint64_t tick) override {
         // Periodic tick — could be used for keepalive, stats, etc.
     }
 

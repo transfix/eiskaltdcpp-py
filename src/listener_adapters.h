@@ -83,34 +83,34 @@ public:
 
 protected:
     // dcpp::ClientListener overrides — dispatch to named methods
-    void on(Connecting, dcpp::Client* c) noexcept override {
+    void on(Connecting, dcpp::Client* c) override {
         onConnecting(c->getHubUrl());
     }
-    void on(Connected, dcpp::Client* c) noexcept override {
+    void on(Connected, dcpp::Client* c) override {
         onConnected(c->getHubUrl());
     }
-    void on(Failed, dcpp::Client* c, const std::string& reason) noexcept override {
+    void on(Failed, dcpp::Client* c, const std::string& reason) override {
         onFailed(c->getHubUrl(), reason);
     }
-    void on(Redirect, dcpp::Client* c, const std::string& newUrl) noexcept override {
+    void on(Redirect, dcpp::Client* c, const std::string& newUrl) override {
         onRedirect(c->getHubUrl(), newUrl);
     }
-    void on(GetPassword, dcpp::Client* c) noexcept override {
+    void on(GetPassword, dcpp::Client* c) override {
         onGetPassword(c->getHubUrl());
     }
-    void on(HubUpdated, dcpp::Client* c) noexcept override {
+    void on(HubUpdated, dcpp::Client* c) override {
         onHubUpdated(c->getHubUrl());
     }
-    void on(NickTaken, dcpp::Client* c) noexcept override {
+    void on(NickTaken, dcpp::Client* c) override {
         onNickTaken(c->getHubUrl());
     }
-    void on(HubFull, dcpp::Client* c) noexcept override {
+    void on(HubFull, dcpp::Client* c) override {
         onHubFull(c->getHubUrl());
     }
-    void on(SearchFlood, dcpp::Client* c, const std::string& msg) noexcept override {
+    void on(SearchFlood, dcpp::Client* c, const std::string& msg) override {
         onSearchFlood(c->getHubUrl(), msg);
     }
-    void on(Message, dcpp::Client* c, const dcpp::ChatMessage& cm) noexcept override {
+    void on(Message, dcpp::Client* c, const dcpp::ChatMessage& cm) override {
         std::string nick;
         bool thirdPerson = cm.thirdPerson;
         if (cm.from) {
@@ -119,20 +119,20 @@ protected:
         onMessage(c->getHubUrl(), nick, cm.text, thirdPerson);
     }
     void on(StatusMessage, dcpp::Client* c, const std::string& msg,
-            int flags) noexcept override {
+            int flags) override {
         onStatusMessage(c->getHubUrl(), msg, flags);
     }
-    void on(UserUpdated, dcpp::Client* c, const dcpp::OnlineUser& ou) noexcept override {
+    void on(UserUpdated, dcpp::Client* c, const dcpp::OnlineUser& ou) override {
         onUserUpdated(c->getHubUrl(), userFromOnlineUser(ou));
     }
-    void on(UsersUpdated, dcpp::Client* c, const dcpp::OnlineUserList&) noexcept override {
+    void on(UsersUpdated, dcpp::Client* c, const dcpp::OnlineUserList&) override {
         onUsersUpdated(c->getHubUrl());
     }
-    void on(UserRemoved, dcpp::Client* c, const dcpp::OnlineUser& ou) noexcept override {
+    void on(UserRemoved, dcpp::Client* c, const dcpp::OnlineUser& ou) override {
         onUserRemoved(c->getHubUrl(), userFromOnlineUser(ou));
     }
     void on(HubUserCommand, dcpp::Client* c, int type, int ctx,
-            const std::string& name, const std::string& command) noexcept override {
+            const std::string& name, const std::string& command) override {
         onHubUserCommand(c->getHubUrl(), type, ctx, name, command);
     }
     // NmdcSearch and AdcSearch are deliberately not exposed — too low-level
@@ -157,32 +157,32 @@ public:
 
 protected:
     void on(dcpp::ClientManagerListener::UserConnected,
-            const dcpp::UserPtr& user) noexcept override {
+            const dcpp::UserPtr& user) override {
         onUserConnected(user->getCID().toBase32());
     }
     void on(dcpp::ClientManagerListener::UserUpdated,
-            const dcpp::OnlineUser& ou) noexcept override {
+            const dcpp::OnlineUser& ou) override {
         std::string hubUrl = ou.getClient().getHubUrl();
         onUserUpdated(hubUrl, userFromOnlineUser(ou));
     }
     void on(dcpp::ClientManagerListener::UserDisconnected,
-            const dcpp::UserPtr& user) noexcept override {
+            const dcpp::UserPtr& user) override {
         onUserDisconnected(user->getCID().toBase32());
     }
     void on(dcpp::ClientManagerListener::IncomingSearch,
-            const std::string& s) noexcept override {
+            const std::string& s) override {
         onIncomingSearch(s);
     }
     void on(dcpp::ClientManagerListener::ClientConnected,
-            dcpp::Client* c) noexcept override {
+            dcpp::Client* c) override {
         onClientConnected(c->getHubUrl());
     }
     void on(dcpp::ClientManagerListener::ClientUpdated,
-            dcpp::Client* c) noexcept override {
+            dcpp::Client* c) override {
         onClientUpdated(c->getHubUrl());
     }
     void on(dcpp::ClientManagerListener::ClientDisconnected,
-            dcpp::Client* c) noexcept override {
+            dcpp::Client* c) override {
         onClientDisconnected(c->getHubUrl());
     }
 };
@@ -200,7 +200,7 @@ public:
 protected:
     // SearchManagerListener::on(SR, ...) is pure virtual in dcpp
     void on(dcpp::SearchManagerListener::SR,
-            const dcpp::SearchResultPtr& sr) noexcept override {
+            const dcpp::SearchResultPtr& sr) override {
         onSearchResult(infoFromSearchResult(sr));
     }
 };
@@ -242,64 +242,64 @@ public:
     virtual void onPartialList(const std::string& nick, const std::string& text) {}
 
 protected:
-    void on(Added, dcpp::QueueItem* qi) noexcept override {
+    void on(Added, dcpp::QueueItem* qi) override {
         onAdded(qi->getTarget(), qi->getSize(), qi->getTTH().toBase32());
     }
     void on(Finished, dcpp::QueueItem* qi, const std::string& dir,
-            int64_t) noexcept override {
+            int64_t) override {
         onFinished(qi->getTarget(), qi->getSize(), dir);
     }
-    void on(Removed, dcpp::QueueItem* qi) noexcept override {
+    void on(Removed, dcpp::QueueItem* qi) override {
         onRemoved(qi->getTarget());
     }
     void on(Moved, dcpp::QueueItem* qi,
-            const std::string& newTarget) noexcept override {
+            const std::string& newTarget) override {
         onMoved(qi->getTarget(), newTarget);
     }
-    void on(SourcesUpdated, dcpp::QueueItem* qi) noexcept override {
+    void on(SourcesUpdated, dcpp::QueueItem* qi) override {
         onSourcesUpdated(qi->getTarget());
     }
-    void on(StatusUpdated, dcpp::QueueItem* qi) noexcept override {
+    void on(StatusUpdated, dcpp::QueueItem* qi) override {
         onStatusUpdated(qi->getTarget());
     }
-    void on(SearchStringUpdated, dcpp::QueueItem* qi) noexcept override {
+    void on(SearchStringUpdated, dcpp::QueueItem* qi) override {
         onSearchStringUpdated(qi->getTarget());
     }
-    void on(FileMoved, const std::string& target) noexcept override {
+    void on(FileMoved, const std::string& target) override {
         onFileMoved(target);
     }
-    void on(RecheckStarted, const std::string& t) noexcept override {
+    void on(RecheckStarted, const std::string& t) override {
         onRecheckStarted(t);
     }
-    void on(RecheckNoFile, const std::string& t) noexcept override {
+    void on(RecheckNoFile, const std::string& t) override {
         onRecheckNoFile(t);
     }
-    void on(RecheckFileTooSmall, const std::string& t) noexcept override {
+    void on(RecheckFileTooSmall, const std::string& t) override {
         onRecheckFileTooSmall(t);
     }
-    void on(RecheckDownloadsRunning, const std::string& t) noexcept override {
+    void on(RecheckDownloadsRunning, const std::string& t) override {
         onRecheckDownloadsRunning(t);
     }
-    void on(RecheckNoTree, const std::string& t) noexcept override {
+    void on(RecheckNoTree, const std::string& t) override {
         onRecheckNoTree(t);
     }
-    void on(RecheckAlreadyFinished, const std::string& t) noexcept override {
+    void on(RecheckAlreadyFinished, const std::string& t) override {
         onRecheckAlreadyFinished(t);
     }
-    void on(RecheckDone, const std::string& t) noexcept override {
+    void on(RecheckDone, const std::string& t) override {
         onRecheckDone(t);
     }
     void on(CRCFailed, dcpp::Download* dl,
-            const std::string& reason) noexcept override {
+            const std::string& reason) override {
         std::string target = dl ? dl->getPath() : "";
         onCRCFailed(target, reason);
     }
-    void on(CRCChecked, dcpp::Download* dl) noexcept override {
+    void on(CRCChecked, dcpp::Download* dl) override {
         std::string target = dl ? dl->getPath() : "";
         onCRCChecked(target);
     }
     void on(PartialList, const dcpp::HintedUser& hu,
-            const std::string& text) noexcept override {
+            const std::string& text) override {
         std::string nick;
         if (hu.user) {
             auto nicks = dcpp::getContext()->getClientManager()->getNicks(hu);
@@ -325,14 +325,14 @@ public:
                           const std::string& reason) {}
 
 protected:
-    void on(Requesting, dcpp::Download* dl) noexcept override {
+    void on(Requesting, dcpp::Download* dl) override {
         onRequesting(infoFromDownload(dl));
     }
-    void on(Starting, dcpp::Download* dl) noexcept override {
+    void on(Starting, dcpp::Download* dl) override {
         onStarting(infoFromDownload(dl));
     }
     void on(dcpp::DownloadManagerListener::Tick,
-            const dcpp::DownloadList& dls) noexcept override {
+            const dcpp::DownloadList& dls) override {
         std::vector<TransferInfo> transfers;
         transfers.reserve(dls.size());
         for (auto* dl : dls) {
@@ -340,11 +340,11 @@ protected:
         }
         onTick(transfers);
     }
-    void on(Complete, dcpp::Download* dl) noexcept override {
+    void on(Complete, dcpp::Download* dl) override {
         onComplete(infoFromDownload(dl));
     }
     void on(dcpp::DownloadManagerListener::Failed, dcpp::Download* dl,
-            const std::string& reason) noexcept override {
+            const std::string& reason) override {
         onFailed(infoFromDownload(dl), reason);
     }
 };
@@ -367,11 +367,11 @@ public:
     virtual void onWaitingRemoveUser(const std::string& nick) {}
 
 protected:
-    void on(Starting, dcpp::Upload* ul) noexcept override {
+    void on(Starting, dcpp::Upload* ul) override {
         onStarting(infoFromUpload(ul));
     }
     void on(dcpp::UploadManagerListener::Tick,
-            const dcpp::UploadList& uls) noexcept override {
+            const dcpp::UploadList& uls) override {
         std::vector<TransferInfo> transfers;
         transfers.reserve(uls.size());
         for (auto* ul : uls) {
@@ -379,15 +379,15 @@ protected:
         }
         onTick(transfers);
     }
-    void on(Complete, dcpp::Upload* ul) noexcept override {
+    void on(Complete, dcpp::Upload* ul) override {
         onComplete(infoFromUpload(ul));
     }
     void on(dcpp::UploadManagerListener::Failed, dcpp::Upload* ul,
-            const std::string& reason) noexcept override {
+            const std::string& reason) override {
         onFailed(infoFromUpload(ul), reason);
     }
     void on(WaitingAddFile, const dcpp::HintedUser& hu,
-            const std::string& filename) noexcept override {
+            const std::string& filename) override {
         std::string nick;
         if (hu.user) {
             auto nicks = dcpp::getContext()->getClientManager()->getNicks(hu);
@@ -395,7 +395,7 @@ protected:
         }
         onWaitingAddFile(nick, filename);
     }
-    void on(WaitingRemoveUser, const dcpp::HintedUser& hu) noexcept override {
+    void on(WaitingRemoveUser, const dcpp::HintedUser& hu) override {
         std::string nick;
         if (hu.user) {
             auto nicks = dcpp::getContext()->getClientManager()->getNicks(hu);
@@ -417,10 +417,10 @@ public:
     virtual void onMinute(uint64_t tick) {}
 
 protected:
-    void on(Second, uint64_t tick) noexcept override {
+    void on(Second, uint64_t tick) override {
         onSecond(tick);
     }
-    void on(Minute, uint64_t tick) noexcept override {
+    void on(Minute, uint64_t tick) override {
         onMinute(tick);
     }
 };
