@@ -185,7 +185,8 @@ jobs:
           $env:PATH = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin;$($env:PATH -replace 'C:\\msys64\\usr\\bin;?','')"
           $env:PYTHONPATH = "build/python"
           python -m pytest tests/ -v -s --tb=short `
-            --ignore=tests/test_integration.py
+            --ignore=tests/test_integration.py `
+            --ignore=tests/test_file_transfer.py
 
       - name: Compute artifact name
         id: artifact
@@ -265,7 +266,8 @@ jobs:
       - name: Run tests (pytest direct)
         run: |
           PYTHONPATH=build/python python -m pytest tests/ -v --tb=short \
-            --ignore=tests/test_integration.py
+            --ignore=tests/test_integration.py \
+            --ignore=tests/test_file_transfer.py
 
       - name: Compute artifact name
         id: artifact
@@ -341,6 +343,6 @@ jobs:
         env:
           PYTHONPATH: build/python
         run: |
-          python -m pytest tests/test_integration.py \
+          python -m pytest tests/test_integration.py tests/test_file_transfer.py \
             -v --tb=long --timeout=300 -x \
             -o "addopts="
