@@ -109,7 +109,7 @@ if(NOT EISKALTDCPP_FOUND)
 
     FetchContent_Declare(eiskaltdcpp
         GIT_REPOSITORY https://github.com/transfix/eiskaltdcpp.git
-        GIT_TAG        22e355832b6bc53c1c637ac16882fe53ae48d315
+        GIT_TAG        7c155b84723993989d61dcf4fa9bdf0547cda3db
     )
 
     # Disable everything except the core library

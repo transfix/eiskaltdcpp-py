@@ -136,6 +136,11 @@ async def alice_bob_with_shares():
             await client_obj.set_setting("COMPRESS_TRANSFERS", "0")
             await client_obj.set_setting("MAX_COMPRESSION", "0")
             await client_obj.set_setting("BUFFER_SIZE", "64")
+            # Limit $GetINFO requests to avoid $MyINFO flood on large hubs.
+            # 0 = unlimited (default); positive = cap.  On hubs with thousands
+            # of users the Identity objects from $MyINFO responses can exhaust
+            # the heap and cause std::bad_alloc on subsequent allocations.
+            await client_obj.set_setting("NMDC_GETINFO_LIMIT", "10")
 
         # Apply the connection settings (opens TCP/UDP listeners)
         await alice.start_networking()
