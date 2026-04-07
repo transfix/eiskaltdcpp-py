@@ -142,7 +142,7 @@ async def alice_bob_with_shares():
         await alice.set_setting("SLOTS", "3")
 
         # Bob: passive — no TCP listener, relies on $RevConnectToMe
-        await bob.set_setting("INCOMING_CONNECTIONS", "2")  # Firewall/Passive
+        await bob.set_setting("INCOMING_CONNECTIONS", "3")  # INCOMING_FIREWALL_PASSIVE
         await bob.set_setting("AUTO_DETECT_CONNECTION", "0")
         await bob.set_setting("SLOTS", "3")
 
