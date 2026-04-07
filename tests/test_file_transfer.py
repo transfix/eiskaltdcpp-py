@@ -115,19 +115,36 @@ async def alice_bob_with_shares():
         await bob.set_setting("Description", "eiskaltdcpp-py FT test bot B")
         await bob.set_setting("DownloadDirectory", str(bob_dl) + "/")
 
-        # Configure active mode with unique ports so clients can
-        # establish direct connections for file list / file transfers.
+        # Connection mode: alice = ACTIVE (listens for incoming connections),
+        # bob = PASSIVE (asks peers to connect to him via $RevConnectToMe).
+        #
+        # This avoids having alice process incoming $ConnectToMe messages,
+        # which can trigger heap-corruption-related std::bad_alloc on some
+        # hubs due to the volume of protocol traffic from other users.
+        # With bob passive, the flow is:
+        #   bob  → hub: $RevConnectToMe bob alice
+        #   hub  → alice: $RevConnectToMe bob alice
+        #   alice → hub: $ConnectToMe alice bob <alice_ip>:<port>   (no allocation)
+        #   hub  → bob: $ConnectToMe alice bob <ip>:<port>
+        #   bob  → alice: TCP connect  (bob's heap is clean)
+        #
         # NOTE: Use the actual SettingsManager enum names (UPPER_SNAKE_CASE),
         # not DC++ GUI names — SWIG exposes the C++ enum identifiers.
-        for client_obj, tcp_port in [(alice, "4200"), (bob, "4210")]:
-            await client_obj.set_setting("INCOMING_CONNECTIONS", "0")  # Active/Direct
-            await client_obj.set_setting("TCP_PORT", tcp_port)
-            await client_obj.set_setting("UDP_PORT", tcp_port)
-            await client_obj.set_setting("TLS_PORT", str(int(tcp_port) + 1))
-            await client_obj.set_setting("EXTERNAL_IP", "127.0.0.1")
-            await client_obj.set_setting("NO_IP_OVERRIDE", "1")
-            await client_obj.set_setting("AUTO_DETECT_CONNECTION", "0")
-            await client_obj.set_setting("SLOTS", "3")
+
+        # Alice: active — opens TCP/TLS listeners
+        await alice.set_setting("INCOMING_CONNECTIONS", "0")  # Active/Direct
+        await alice.set_setting("TCP_PORT", "4200")
+        await alice.set_setting("UDP_PORT", "4200")
+        await alice.set_setting("TLS_PORT", "4201")
+        await alice.set_setting("EXTERNAL_IP", "127.0.0.1")
+        await alice.set_setting("NO_IP_OVERRIDE", "1")
+        await alice.set_setting("AUTO_DETECT_CONNECTION", "0")
+        await alice.set_setting("SLOTS", "3")
+
+        # Bob: passive — no TCP listener, relies on $RevConnectToMe
+        await bob.set_setting("INCOMING_CONNECTIONS", "2")  # Firewall/Passive
+        await bob.set_setting("AUTO_DETECT_CONNECTION", "0")
+        await bob.set_setting("SLOTS", "3")
 
         # Reduce memory footprint: disable DHT and transfer compression
         # to keep RAM usage low on CI runners.
@@ -136,11 +153,10 @@ async def alice_bob_with_shares():
             await client_obj.set_setting("COMPRESS_TRANSFERS", "0")
             await client_obj.set_setting("MAX_COMPRESSION", "0")
             await client_obj.set_setting("BUFFER_SIZE", "64")
-            # Limit $GetINFO requests to avoid $MyINFO flood on large hubs.
-            # 0 = unlimited (default); positive = cap.  On hubs with thousands
-            # of users the Identity objects from $MyINFO responses can exhaust
-            # the heap and cause std::bad_alloc on subsequent allocations.
-            await client_obj.set_setting("NMDC_GETINFO_LIMIT", "10")
+            # Limit $GetINFO requests sent during $NickList processing.
+            # This only controls how many users we explicitly request info for;
+            # all users are still tracked via $MyINFO broadcasts from the hub.
+            await client_obj.set_setting("NMDC_GETINFO_LIMIT", "100")
 
         # Apply the connection settings (opens TCP/UDP listeners)
         await alice.start_networking()
