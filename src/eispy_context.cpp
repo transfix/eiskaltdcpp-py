@@ -801,26 +801,39 @@ void EisPyContext::matchAllLists() {
 bool EisPyContext::requestFileList(const std::string& hubUrl,
                                const std::string& nick,
                                bool matchQueue) {
-    if (!m_initialized.load()) return false;
+    fprintf(stderr, "[EisPyContext::requestFileList] hub=%s nick=%s\n",
+            hubUrl.c_str(), nick.c_str());
+    if (!m_initialized.load()) {
+        fprintf(stderr, "[EisPyContext::requestFileList] not initialized\n");
+        return false;
+    }
 
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         auto* client = findClient(hubUrl);
-        if (!client) return false;
+        if (!client) {
+            fprintf(stderr, "[EisPyContext::requestFileList] client not found for hub\n");
+            return false;
+        }
     }
 
     UserPtr user = getContext()->getClientManager()->findUser(nick, hubUrl);
     if (user) {
+        fprintf(stderr, "[EisPyContext::requestFileList] user found, CID=%s\n",
+                user->getCID().toBase32().c_str());
         try {
             getContext()->getQueueManager()->addList(
                 HintedUser(user, hubUrl),
                 matchQueue ? QueueItem::FLAG_MATCH_QUEUE : 0,
                 "");
+            fprintf(stderr, "[EisPyContext::requestFileList] addList OK\n");
             return true;
-        } catch (const Exception&) {
+        } catch (const std::exception& e) {
+            fprintf(stderr, "[EisPyContext::requestFileList] addList exception: %s\n", e.what());
             return false;
         }
     }
+    fprintf(stderr, "[EisPyContext::requestFileList] user NOT found\n");
     return false;
 }
 
