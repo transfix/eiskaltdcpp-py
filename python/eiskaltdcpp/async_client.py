@@ -122,6 +122,100 @@ class AsyncDCClient:
     def version(self) -> str:
         return self._sync_client.version
 
+    # ------------------------------------------------------------------
+    # Direct manager access (Phase 2 — delegates to sync client)
+    # ------------------------------------------------------------------
+
+    @property
+    def settings(self):
+        """Direct access to SettingsManager."""
+        return self._sync_client.settings
+
+    @property
+    def clients(self):
+        """Direct access to ClientManager."""
+        return self._sync_client.clients
+
+    @property
+    def queue(self):
+        """Direct access to QueueManager."""
+        return self._sync_client.queue
+
+    @property
+    def shares(self):
+        """Direct access to ShareManager."""
+        return self._sync_client.shares
+
+    @property
+    def search_manager(self):
+        """Direct access to SearchManager."""
+        return self._sync_client.search_manager
+
+    @property
+    def downloads(self):
+        """Direct access to DownloadManager."""
+        return self._sync_client.downloads
+
+    @property
+    def uploads(self):
+        """Direct access to UploadManager."""
+        return self._sync_client.uploads
+
+    @property
+    def favorites(self):
+        """Direct access to FavoriteManager."""
+        return self._sync_client.favorites
+
+    @property
+    def finished(self):
+        """Direct access to FinishedManager."""
+        return self._sync_client.finished
+
+    @property
+    def hashing(self):
+        """Direct access to HashManager."""
+        return self._sync_client.hashing
+
+    @property
+    def throttle(self):
+        """Direct access to ThrottleManager."""
+        return self._sync_client.throttle
+
+    @property
+    def connectivity(self):
+        """Direct access to ConnectivityManager."""
+        return self._sync_client.connectivity
+
+    @property
+    def crypto(self):
+        """Direct access to CryptoManager."""
+        return self._sync_client.crypto
+
+    @property
+    def logs(self):
+        """Direct access to LogManager."""
+        return self._sync_client.logs
+
+    @property
+    def ip_filter(self):
+        """Direct access to IPFilter."""
+        return self._sync_client.ip_filter
+
+    @property
+    def adl_search(self):
+        """Direct access to ADLSearchManager."""
+        return self._sync_client.adl_search
+
+    @property
+    def connection_manager(self):
+        """Direct access to ConnectionManager."""
+        return self._sync_client.connection_manager
+
+    @property
+    def dyndns(self):
+        """Direct access to DynDNS."""
+        return self._sync_client.dyndns
+
     async def __aenter__(self) -> "AsyncDCClient":
         await self.initialize()
         return self
@@ -481,11 +575,11 @@ class AsyncDCClient:
         finally:
             self._disconnect_events.pop(url, None)
 
-    def is_connected(self, url: str) -> bool:
+    async def is_connected(self, url: str) -> bool:
         """Check if connected to a specific hub."""
         return self._sync_client.is_connected(url)
 
-    def list_hubs(self) -> list:
+    async def list_hubs(self) -> list:
         """List connected hubs."""
         return self._sync_client.list_hubs()
 
@@ -493,11 +587,11 @@ class AsyncDCClient:
     # Chat (async)
     # ------------------------------------------------------------------
 
-    def send_message(self, hub_url: str, message: str) -> None:
+    async def send_message(self, hub_url: str, message: str) -> None:
         """Send a public chat message."""
         self._sync_client.send_message(hub_url, message)
 
-    def send_pm(self, hub_url: str, nick: str, message: str) -> None:
+    async def send_pm(self, hub_url: str, nick: str, message: str) -> None:
         """Send a private message."""
         self._sync_client.send_pm(hub_url, nick, message)
 
@@ -539,7 +633,7 @@ class AsyncDCClient:
                     + (f" from {from_nick}" if from_nick else "")
                 )
 
-    def get_chat_history(
+    async def get_chat_history(
         self, hub_url: str, max_lines: int = 100
     ) -> list[str]:
         """Get recent chat history."""
@@ -549,11 +643,11 @@ class AsyncDCClient:
     # Users
     # ------------------------------------------------------------------
 
-    def get_users(self, hub_url: str) -> list:
+    async def get_users(self, hub_url: str) -> list:
         """Get list of users on a hub."""
         return self._sync_client.get_users(hub_url)
 
-    def get_user(self, nick: str, hub_url: str) -> Any:
+    async def get_user(self, nick: str, hub_url: str) -> Any:
         """Get info about a specific user."""
         return self._sync_client.get_user(nick, hub_url)
 
@@ -579,7 +673,7 @@ class AsyncDCClient:
         """
         deadline = asyncio.get_event_loop().time() + timeout
         while True:
-            users = self.get_users(hub_url)
+            users = await self.get_users(hub_url)
             for u in users:
                 if u.nick == nick:
                     return u
@@ -595,7 +689,7 @@ class AsyncDCClient:
     # Search (async)
     # ------------------------------------------------------------------
 
-    def search(
+    async def search(
         self,
         query: str,
         file_type: int = 0,
@@ -638,7 +732,7 @@ class AsyncDCClient:
             except asyncio.QueueEmpty:
                 break
 
-        self.search(query, file_type, size_mode, size, hub_url)
+        await self.search(query, file_type, size_mode, size, hub_url)
 
         results: list[dict[str, Any]] = []
         deadline = asyncio.get_event_loop().time() + timeout
@@ -657,11 +751,11 @@ class AsyncDCClient:
 
         return results
 
-    def get_search_results(self, hub_url: str = "") -> list:
+    async def get_search_results(self, hub_url: str = "") -> list:
         """Get accumulated search results."""
         return self._sync_client.get_search_results(hub_url)
 
-    def clear_search_results(self, hub_url: str = "") -> None:
+    async def clear_search_results(self, hub_url: str = "") -> None:
         """Clear search results."""
         self._sync_client.clear_search_results(hub_url)
 
@@ -669,13 +763,13 @@ class AsyncDCClient:
     # Download queue (async)
     # ------------------------------------------------------------------
 
-    def download(
+    async def download(
         self, directory: str, name: str, size: int, tth: str
     ) -> bool:
         """Add a file to the download queue."""
         return self._sync_client.download(directory, name, size, tth)
 
-    def download_magnet(
+    async def download_magnet(
         self, magnet: str, download_dir: str = ""
     ) -> bool:
         """Add a magnet link to the download queue."""
@@ -702,7 +796,7 @@ class AsyncDCClient:
         self._download_results[target] = (False, "timeout")
 
         try:
-            self.download(directory, name, size, tth)
+            await self.download(directory, name, size, tth)
             await asyncio.wait_for(ev.wait(), timeout=timeout)
             return self._download_results.get(target, (False, "unknown"))
         except asyncio.TimeoutError:
@@ -711,15 +805,19 @@ class AsyncDCClient:
             self._download_events.pop(target, None)
             self._download_results.pop(target, None)
 
-    def remove_download(self, target: str) -> None:
+    async def remove_download(self, target: str) -> None:
         """Remove from download queue."""
         self._sync_client.remove_download(target)
 
-    def list_queue(self) -> list:
+    async def set_priority(self, target: str, priority: int) -> None:
+        """Set download priority (0=paused, 1=lowest..5=highest)."""
+        self._sync_client.set_priority(target, priority)
+
+    async def list_queue(self) -> list:
         """List download queue."""
         return self._sync_client.list_queue()
 
-    def clear_queue(self) -> None:
+    async def clear_queue(self) -> None:
         """Clear download queue."""
         self._sync_client.clear_queue()
 
@@ -847,17 +945,23 @@ class AsyncDCClient:
     # Sharing
     # ------------------------------------------------------------------
 
-    def add_share(self, real_path: str, virtual_name: str) -> bool:
+    async def add_share(self, real_path: str, virtual_name: str) -> bool:
         return self._sync_client.add_share(real_path, virtual_name)
 
-    def remove_share(self, real_path: str) -> bool:
+    async def remove_share(self, real_path: str) -> bool:
         return self._sync_client.remove_share(real_path)
 
-    def list_shares(self) -> list:
+    async def list_shares(self) -> list:
         return self._sync_client.list_shares()
 
-    def refresh_share(self) -> None:
+    async def refresh_share(self) -> None:
         self._sync_client.refresh_share()
+
+    async def get_share_size(self) -> int:
+        return self._sync_client.share_size
+
+    async def get_shared_files(self) -> int:
+        return self._sync_client.shared_files
 
     @property
     def share_size(self) -> int:
@@ -871,19 +975,32 @@ class AsyncDCClient:
     # Settings
     # ------------------------------------------------------------------
 
-    def get_setting(self, name: str) -> str:
+    async def get_setting(self, name: str) -> str:
         return self._sync_client.get_setting(name)
 
-    def set_setting(self, name: str, value: str) -> None:
+    async def set_setting(self, name: str, value: str) -> None:
         self._sync_client.set_setting(name, value)
 
-    def start_networking(self) -> None:
+    async def reload_config(self) -> None:
+        """Reload configuration from disk."""
+        self._sync_client.reload_config()
+
+    async def start_networking(self) -> None:
         """(Re)start the networking stack (connection listeners)."""
         self._sync_client.start_networking()
 
     # ------------------------------------------------------------------
     # Transfers & Hashing
     # ------------------------------------------------------------------
+
+    async def get_transfer_stats(self) -> Any:
+        return self._sync_client.transfer_stats
+
+    async def get_hash_status(self) -> Any:
+        return self._sync_client.hash_status
+
+    async def pause_hashing(self, pause: bool = True) -> None:
+        self._sync_client.pause_hashing(pause)
 
     @property
     def transfer_stats(self) -> Any:
@@ -893,36 +1010,33 @@ class AsyncDCClient:
     def hash_status(self) -> Any:
         return self._sync_client.hash_status
 
-    def pause_hashing(self, pause: bool = True) -> None:
-        self._sync_client.pause_hashing(pause)
-
     # ------------------------------------------------------------------
     # Lua scripting
     # ------------------------------------------------------------------
 
-    def lua_is_available(self) -> bool:
+    async def lua_is_available(self) -> bool:
         """Check if Lua scripting support is available."""
         return self._sync_client.lua_is_available()
 
-    def lua_eval(self, code: str) -> None:
+    async def lua_eval(self, code: str) -> None:
         """Evaluate a Lua code chunk.
 
         Raises LuaError subclasses on failure.
         """
         self._sync_client.lua_eval(code)
 
-    def lua_eval_file(self, path: str) -> None:
+    async def lua_eval_file(self, path: str) -> None:
         """Evaluate a Lua script file.
 
         Raises LuaError subclasses on failure.
         """
         self._sync_client.lua_eval_file(path)
 
-    def lua_get_scripts_path(self) -> str:
+    async def lua_get_scripts_path(self) -> str:
         """Get the Lua scripts directory path."""
         return self._sync_client.lua_get_scripts_path()
 
-    def lua_list_scripts(self) -> list[str]:
+    async def lua_list_scripts(self) -> list[str]:
         """List Lua script files in the scripts directory."""
         return self._sync_client.lua_list_scripts()
 

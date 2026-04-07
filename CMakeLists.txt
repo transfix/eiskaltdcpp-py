@@ -6,9 +6,9 @@
 #
 
 cmake_minimum_required(VERSION 3.14)
-project(eiskaltdcpp-py VERSION 2.4.2 LANGUAGES CXX)
+project(eiskaltdcpp-py VERSION 2.5.0.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Generate _version.py so the Python package always knows the version
@@ -109,12 +109,12 @@ if(NOT EISKALTDCPP_FOUND)
 
     FetchContent_Declare(eiskaltdcpp
         GIT_REPOSITORY https://github.com/transfix/eiskaltdcpp.git
-        GIT_TAG        fix/clean-shutdown
-        GIT_SHALLOW    TRUE
+        GIT_TAG        c9940e1e14fe374ba7012c9a29a0ab0136ef0f05
     )
 
     # Disable everything except the core library
     set(NO_UI_DAEMON   ON  CACHE BOOL "" FORCE)
+    set(USE_QT6        OFF CACHE BOOL "" FORCE)
     set(USE_QT         OFF CACHE BOOL "" FORCE)
     set(USE_QT5        OFF CACHE BOOL "" FORCE)
     set(USE_GTK        OFF CACHE BOOL "" FORCE)
@@ -133,7 +133,25 @@ if(NOT EISKALTDCPP_FOUND)
     set(USE_MINIUPNP   ON  CACHE BOOL "" FORCE)
     set(PERL_REGEX     ON  CACHE BOOL "" FORCE)
 
-    FetchContent_MakeAvailable(eiskaltdcpp)
+    # Use FetchContent_Populate + manual patch instead of FetchContent_MakeAvailable
+    # because the eiskaltdcpp CMakeLists.txt uses CMAKE_SOURCE_DIR which resolves
+    # to the parent project root under FetchContent. We patch it to use
+    # CMAKE_CURRENT_SOURCE_DIR before adding the subdirectory.
+    FetchContent_GetProperties(eiskaltdcpp)
+    if(NOT eiskaltdcpp_POPULATED)
+        FetchContent_Populate(eiskaltdcpp)
+        # Patch CMAKE_SOURCE_DIR/CMAKE_BINARY_DIR -> CMAKE_CURRENT_* for FetchContent compat
+        # Uses portable CMake commands instead of sed so this works on Windows too.
+        file(READ "${eiskaltdcpp_SOURCE_DIR}/CMakeLists.txt" _eiskaltdcpp_cml)
+        string(REPLACE "\${CMAKE_SOURCE_DIR}" "\${CMAKE_CURRENT_SOURCE_DIR}" _eiskaltdcpp_cml "${_eiskaltdcpp_cml}")
+        string(REPLACE "\${CMAKE_BINARY_DIR}" "\${CMAKE_CURRENT_BINARY_DIR}" _eiskaltdcpp_cml "${_eiskaltdcpp_cml}")
+        file(WRITE "${eiskaltdcpp_SOURCE_DIR}/CMakeLists.txt" "${_eiskaltdcpp_cml}")
+        # Disable eiskaltdcpp's own tests (BUILD_TESTS leaks from parent)
+        set(_save_build_tests "${BUILD_TESTS}")
+        set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+        add_subdirectory(${eiskaltdcpp_SOURCE_DIR} ${eiskaltdcpp_BINARY_DIR})
+        set(BUILD_TESTS "${_save_build_tests}" CACHE BOOL "" FORCE)
+    endif()
 
     if(TARGET dcpp)
         add_library(eiskaltdcpp::dcpp ALIAS dcpp)

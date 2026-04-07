@@ -2,7 +2,7 @@
 Tests for the dc_core SWIG Python bindings.
 
 These tests verify that the SWIG-generated Python module correctly wraps
-the C++ DCBridge and related classes.
+the C++ EisPyContext and related classes.
 
 Follows the pattern from verlihub's test_verlihub_core.py.
 
@@ -64,8 +64,10 @@ class TestSwigModuleImport:
         assert dc_core is not None
 
     def test_bridge_class_exists(self):
-        """DCBridge class is available."""
+        """EisPyContext (and DCBridge alias) class is available."""
+        assert hasattr(dc_core, "EisPyContext")
         assert hasattr(dc_core, "DCBridge")
+        assert dc_core.DCBridge is dc_core.EisPyContext
 
     def test_callback_class_exists(self):
         """DCClientCallback class is available for directors."""
@@ -97,20 +99,25 @@ class TestSwigModuleImport:
 # ============================================================================
 
 class TestDCBridgeCreation:
-    """Tests for DCBridge creation and lifecycle."""
+    """Tests for EisPyContext creation and lifecycle."""
 
     def test_construct(self):
-        """DCBridge can be constructed."""
+        """EisPyContext can be constructed."""
+        bridge = dc_core.EisPyContext()
+        assert bridge is not None
+
+    def test_construct_via_alias(self):
+        """DCBridge alias still works."""
         bridge = dc_core.DCBridge()
         assert bridge is not None
 
     def test_not_initialized_by_default(self):
-        """Newly constructed bridge is not initialized."""
-        bridge = dc_core.DCBridge()
+        """Newly constructed context is not initialized."""
+        bridge = dc_core.EisPyContext()
         assert not bridge.isInitialized()
 
     def test_bridge_methods_exist(self):
-        """Key methods exist on DCBridge."""
+        """Key methods exist on EisPyContext."""
         methods = [
             "initialize", "shutdown", "isInitialized",
             "setCallback",
@@ -118,29 +125,48 @@ class TestDCBridgeCreation:
             "sendMessage", "sendPM", "getChatHistory",
             "getHubUsers", "getUserInfo",
             "search", "getSearchResults", "clearSearchResults",
-            "addToQueue", "addMagnet", "removeFromQueue",
-            "setPriority", "listQueue", "clearQueue",
+            "addToQueue", "addMagnet",
+            "listQueue", "clearQueue",
             "requestFileList", "openFileList", "browseFileList",
             "closeFileList", "closeAllFileLists",
-            "addShareDir", "removeShareDir", "listShare",
-            "refreshShare", "getShareSize", "getSharedFileCount",
-            "getTransferStats", "getHashStatus", "pauseHashing",
-            "getSetting", "setSetting", "reloadConfig",
+            "addShareDir",
             "getVersion",
+            "startNetworking",
+            "luaIsAvailable", "luaEval", "luaEvalFile",
+            "luaGetScriptsPath", "luaListScripts",
         ]
-        bridge = dc_core.DCBridge()
+        bridge = dc_core.EisPyContext()
         for m in methods:
             assert hasattr(bridge, m), f"Missing method: {m}"
 
+    def test_removed_methods_gone(self):
+        """Pass-through methods removed in Phase 3 are no longer present."""
+        removed = [
+            "removeFromQueue", "moveQueueItem", "setPriority",
+            "removeShareDir", "renameShareDir", "listShare",
+            "refreshShare", "getShareSize", "getSharedFileCount",
+            "getTransferStats", "getHashStatus", "pauseHashing",
+            "getSetting", "setSetting", "reloadConfig",
+        ]
+        bridge = dc_core.EisPyContext()
+        for m in removed:
+            assert not hasattr(bridge, m), f"Method should be removed: {m}"
+
     def test_get_version(self):
         """getVersion returns a non-empty string."""
+        ver = dc_core.EisPyContext.getVersion()
+        assert isinstance(ver, str)
+        assert len(ver) > 0
+
+    def test_get_version_via_alias(self):
+        """getVersion works via DCBridge alias too."""
         ver = dc_core.DCBridge.getVersion()
         assert isinstance(ver, str)
         assert len(ver) > 0
 
     def test_context_manager_support(self):
-        """DCBridge supports __enter__/__exit__."""
-        bridge = dc_core.DCBridge()
+        """EisPyContext supports __enter__/__exit__."""
+        bridge = dc_core.EisPyContext()
         assert hasattr(bridge, "__enter__")
         assert hasattr(bridge, "__exit__")
 
@@ -150,52 +176,50 @@ class TestDCBridgeCreation:
 # ============================================================================
 
 class TestBridgeSettings:
-    """Tests for settings get/set and automatic nick generation.
+    """Tests for settings via direct SettingsManager access.
 
-    These tests share a single bridge instance because dcpp's global
+    These tests share a single context instance because dcpp's global
     singletons don't support repeated startup()/shutdown() cycles within
     the same process.
     """
 
     @pytest.fixture(autouse=True, scope="class")
     def bridge(self, tmp_path_factory):
-        """Create a single bridge for all settings tests."""
+        """Create a single context for all settings tests."""
         cfg = tmp_path_factory.mktemp("dc-settings-tests")
-        b = dc_core.DCBridge()
-        ok = b.initialize(str(cfg) + "/")
-        assert ok, "Bridge initialization failed"
+        b = dc_core.EisPyContext()
+        ok = b.initializeMinimal(str(cfg) + "/")
+        assert ok, "Context initialization failed"
         yield b
         b.shutdown()
 
     def test_get_setting_returns_value(self, bridge):
-        """getSetting returns a value after initialization."""
-        # DownloadDirectory always has a non-empty default
-        dl_dir = bridge.getSetting("DownloadDirectory")
+        """SettingsManager returns a value after initialization."""
+        sm = bridge.settings_manager
+        dl_dir = sm.get(dc_core.SettingsManager.DOWNLOAD_DIRECTORY)
         assert isinstance(dl_dir, str)
         assert len(dl_dir) > 0
 
     def test_set_and_get_setting(self, bridge):
-        """setSetting persists a value readable by getSetting."""
-        bridge.setSetting("Description", "pytest-bot")
-        val = bridge.getSetting("Description")
+        """SettingsManager set persists a value readable by get."""
+        sm = bridge.settings_manager
+        sm.set(dc_core.SettingsManager.DESCRIPTION, "pytest-bot")
+        val = sm.get(dc_core.SettingsManager.DESCRIPTION)
         assert val == "pytest-bot"
 
     def test_default_nick_assigned(self, bridge):
         """A default nick is generated when none is configured."""
-        nick = bridge.getSetting("Nick")
+        sm = bridge.settings_manager
+        nick = sm.get(dc_core.SettingsManager.NICK)
         assert nick, "Expected a non-empty default nick"
-        assert nick.startswith("dcpy-"), \
-            f"Default nick should start with 'dcpy-', got {nick!r}"
+        assert nick.startswith("eispy-"), \
+            f"Default nick should start with 'eispy-', got {nick!r}"
 
     def test_nick_survives_set(self, bridge):
-        """Nick set via setSetting is readable."""
-        bridge.setSetting("Nick", "my-test-nick")
-        assert bridge.getSetting("Nick") == "my-test-nick"
-
-    def test_unknown_setting_returns_empty(self, bridge):
-        """getSetting returns empty string for unknown setting names."""
-        val = bridge.getSetting("NonExistentSetting99")
-        assert val == ""
+        """Nick set via SettingsManager is readable."""
+        sm = bridge.settings_manager
+        sm.set(dc_core.SettingsManager.NICK, "my-test-nick")
+        assert sm.get(dc_core.SettingsManager.NICK) == "my-test-nick"
 
     def test_lua_init_no_crash(self, bridge):
         """Initializing the bridge doesn't crash due to Lua scripting.
@@ -439,7 +463,7 @@ class TestDCClientWrapper:
         cfg = str(unique_config_dir)
         client = DCClient(cfg)
         r = repr(client)
-        assert cfg in r
+        assert repr(cfg) in r
         assert "not initialized" in r
 
     def test_dc_client_event_registration(self, unique_config_dir):

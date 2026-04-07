@@ -88,27 +88,27 @@ class DCWorker:
         elif cmd == "disconnect":
             return await self._cmd_disconnect(args)
         elif cmd == "set_setting":
-            return self._cmd_set_setting(args)
+            return await self._cmd_set_setting(args)
         elif cmd == "get_setting":
-            return self._cmd_get_setting(args)
+            return await self._cmd_get_setting(args)
         elif cmd == "is_connected":
-            return self._cmd_is_connected(args)
+            return await self._cmd_is_connected(args)
         elif cmd == "list_hubs":
-            return self._cmd_list_hubs()
+            return await self._cmd_list_hubs()
         elif cmd == "get_users":
-            return self._cmd_get_users(args)
+            return await self._cmd_get_users(args)
         elif cmd == "send_pm":
-            return self._cmd_send_pm(args)
+            return await self._cmd_send_pm(args)
         elif cmd == "wait_pm":
             return await self._cmd_wait_pm(args)
         elif cmd == "send_message":
-            return self._cmd_send_message(args)
+            return await self._cmd_send_message(args)
         elif cmd == "search":
             return await self._cmd_search(args)
         elif cmd == "add_share":
-            return self._cmd_add_share(args)
+            return await self._cmd_add_share(args)
         elif cmd == "refresh_share":
-            return self._cmd_refresh_share()
+            return await self._cmd_refresh_share()
         elif cmd == "request_file_list":
             return self._cmd_request_file_list(args)
         elif cmd == "request_and_browse_file_list":
@@ -124,9 +124,9 @@ class DCWorker:
         elif cmd == "download_and_wait":
             return await self._cmd_download_and_wait(args)
         elif cmd == "list_queue":
-            return self._cmd_list_queue()
+            return await self._cmd_list_queue()
         elif cmd == "clear_queue":
-            return self._cmd_clear_queue()
+            return await self._cmd_clear_queue()
         elif cmd == "close_file_list":
             return self._cmd_close_file_list(args)
         elif cmd == "close_all_file_lists":
@@ -134,9 +134,9 @@ class DCWorker:
         elif cmd == "get_share_size":
             return self._cmd_get_share_size()
         elif cmd == "start_networking":
-            return self._cmd_start_networking()
+            return await self._cmd_start_networking()
         elif cmd == "resume_hashing":
-            return self._cmd_resume_hashing()
+            return await self._cmd_resume_hashing()
         elif cmd == "get_hash_status":
             return self._cmd_get_hash_status()
         elif cmd == "shutdown":
@@ -187,17 +187,17 @@ class DCWorker:
     async def _cmd_disconnect(self, args: dict) -> None:
         await self.client.disconnect(args["hub_url"])
 
-    def _cmd_set_setting(self, args: dict) -> None:
-        self.client.set_setting(args["name"], args["value"])
+    async def _cmd_set_setting(self, args: dict) -> None:
+        await self.client.set_setting(args["name"], args["value"])
 
-    def _cmd_get_setting(self, args: dict) -> str:
-        return self.client.get_setting(args["name"])
+    async def _cmd_get_setting(self, args: dict) -> str:
+        return await self.client.get_setting(args["name"])
 
-    def _cmd_is_connected(self, args: dict) -> bool:
-        return self.client.is_connected(args["hub_url"])
+    async def _cmd_is_connected(self, args: dict) -> bool:
+        return await self.client.is_connected(args["hub_url"])
 
-    def _cmd_list_hubs(self) -> list:
-        hubs = self.client.list_hubs()
+    async def _cmd_list_hubs(self) -> list:
+        hubs = await self.client.list_hubs()
         return [
             {
                 "url": h.url,
@@ -208,12 +208,12 @@ class DCWorker:
             for h in hubs
         ]
 
-    def _cmd_get_users(self, args: dict) -> list:
-        users = self.client.get_users(args["hub_url"])
+    async def _cmd_get_users(self, args: dict) -> list:
+        users = await self.client.get_users(args["hub_url"])
         return [{"nick": u.nick} for u in users]
 
-    def _cmd_send_pm(self, args: dict) -> None:
-        self.client.send_pm(args["hub_url"], args["nick"], args["message"])
+    async def _cmd_send_pm(self, args: dict) -> None:
+        await self.client.send_pm(args["hub_url"], args["nick"], args["message"])
 
     async def _cmd_wait_pm(self, args: dict) -> dict:
         timeout = args.get("timeout", 20)
@@ -228,8 +228,8 @@ class DCWorker:
             "message": pm[3],
         }
 
-    def _cmd_send_message(self, args: dict) -> None:
-        self.client.send_message(args["hub_url"], args["message"])
+    async def _cmd_send_message(self, args: dict) -> None:
+        await self.client.send_message(args["hub_url"], args["message"])
 
     async def _cmd_search(self, args: dict) -> list:
         timeout = args.get("timeout", 30)
@@ -242,11 +242,11 @@ class DCWorker:
         )
         return results
 
-    def _cmd_add_share(self, args: dict) -> bool:
-        return self.client.add_share(args["real_path"], args["virtual_name"])
+    async def _cmd_add_share(self, args: dict) -> bool:
+        return await self.client.add_share(args["real_path"], args["virtual_name"])
 
-    def _cmd_refresh_share(self) -> None:
-        self.client.refresh_share()
+    async def _cmd_refresh_share(self) -> None:
+        await self.client.refresh_share()
 
     # -- File list commands ------------------------------------------------
 
@@ -311,8 +311,8 @@ class DCWorker:
         )
         return {"ok": ok, "error": err}
 
-    def _cmd_list_queue(self) -> list:
-        items = self.client.list_queue()
+    async def _cmd_list_queue(self) -> list:
+        items = await self.client.list_queue()
         return [
             {
                 "target": q.target,
@@ -328,8 +328,8 @@ class DCWorker:
             for q in items
         ]
 
-    def _cmd_clear_queue(self) -> None:
-        self.client.clear_queue()
+    async def _cmd_clear_queue(self) -> None:
+        await self.client.clear_queue()
 
     def _cmd_close_file_list(self, args: dict) -> None:
         self.client.close_file_list(args["file_list_id"])
@@ -340,11 +340,11 @@ class DCWorker:
     def _cmd_get_share_size(self) -> int:
         return self.client.share_size
 
-    def _cmd_start_networking(self) -> None:
-        self.client.start_networking()
+    async def _cmd_start_networking(self) -> None:
+        await self.client.start_networking()
 
-    def _cmd_resume_hashing(self) -> None:
-        self.client.pause_hashing(False)
+    async def _cmd_resume_hashing(self) -> None:
+        await self.client.pause_hashing(False)
 
     def _cmd_get_hash_status(self) -> dict:
         hs = self.client.hash_status

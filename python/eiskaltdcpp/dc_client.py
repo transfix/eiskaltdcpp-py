@@ -1,7 +1,7 @@
 """
 High-level Python wrapper for the eiskaltdcpp DC client core.
 
-This module provides a Pythonic interface to the C++ DCBridge via SWIG bindings,
+This module provides a Pythonic interface to the C++ EisPyContext via SWIG bindings,
 following the same pattern as verlihub's core.py wrapper.
 
 Usage:
@@ -243,7 +243,7 @@ class DCClient:
     """
 
     def __init__(self, config_dir: str | Path = "") -> None:
-        self._bridge = dc_core.DCBridge()
+        self._bridge = dc_core.EisPyContext()
         self._router = _CallbackRouter()
         self._config_dir = str(config_dir) if config_dir else ""
         self._initialized = False
@@ -272,7 +272,101 @@ class DCClient:
     @property
     def version(self) -> str:
         """Get libeiskaltdcpp version string."""
-        return dc_core.DCBridge.getVersion()
+        return dc_core.EisPyContext.getVersion()
+
+    # ------------------------------------------------------------------
+    # Direct manager access (Phase 2 — via DCBridge.context)
+    # ------------------------------------------------------------------
+
+    @property
+    def settings(self):
+        """Direct access to SettingsManager."""
+        return self._bridge.settings_manager
+
+    @property
+    def clients(self):
+        """Direct access to ClientManager."""
+        return self._bridge.client_manager
+
+    @property
+    def queue(self):
+        """Direct access to QueueManager."""
+        return self._bridge.queue_manager
+
+    @property
+    def shares(self):
+        """Direct access to ShareManager."""
+        return self._bridge.share_manager
+
+    @property
+    def search_manager(self):
+        """Direct access to SearchManager."""
+        return self._bridge.search_manager
+
+    @property
+    def downloads(self):
+        """Direct access to DownloadManager."""
+        return self._bridge.download_manager
+
+    @property
+    def uploads(self):
+        """Direct access to UploadManager."""
+        return self._bridge.upload_manager
+
+    @property
+    def favorites(self):
+        """Direct access to FavoriteManager."""
+        return self._bridge.favorite_manager
+
+    @property
+    def finished(self):
+        """Direct access to FinishedManager."""
+        return self._bridge.finished_manager
+
+    @property
+    def hashing(self):
+        """Direct access to HashManager."""
+        return self._bridge.hash_manager
+
+    @property
+    def throttle(self):
+        """Direct access to ThrottleManager."""
+        return self._bridge.throttle_manager
+
+    @property
+    def connectivity(self):
+        """Direct access to ConnectivityManager."""
+        return self._bridge.connectivity_manager
+
+    @property
+    def crypto(self):
+        """Direct access to CryptoManager."""
+        return self._bridge.crypto_manager
+
+    @property
+    def logs(self):
+        """Direct access to LogManager."""
+        return self._bridge.log_manager
+
+    @property
+    def ip_filter(self):
+        """Direct access to IPFilter."""
+        return self._bridge.ip_filter
+
+    @property
+    def adl_search(self):
+        """Direct access to ADLSearchManager."""
+        return self._bridge.adl_search_manager
+
+    @property
+    def connection_manager(self):
+        """Direct access to ConnectionManager."""
+        return self._bridge.connection_manager
+
+    @property
+    def dyndns(self):
+        """Direct access to DynDNS."""
+        return self._bridge.dyndns
 
     # ------------------------------------------------------------------
     # Event registration
@@ -416,15 +510,15 @@ class DCClient:
 
     def remove_download(self, target: str) -> None:
         """Remove an item from the download queue."""
-        self._bridge.removeFromQueue(target)
+        self.queue.remove(target)
 
     def move_download(self, source: str, target: str) -> None:
         """Move a queued download to a new location."""
-        self._bridge.moveQueueItem(source, target)
+        self.queue.move(source, target)
 
     def set_priority(self, target: str, priority: int) -> None:
         """Set download priority (0=paused, 1=lowest..5=highest)."""
-        self._bridge.setPriority(target, priority)
+        self.queue.setPriority(target, priority)
 
     def list_queue(self) -> list:
         """List all items in the download queue."""
@@ -498,63 +592,156 @@ class DCClient:
 
     def remove_share(self, real_path: str) -> bool:
         """Remove a directory from share."""
-        return self._bridge.removeShareDir(real_path)
+        try:
+            self.shares.removeDirectory(real_path)
+            return True
+        except Exception:
+            return False
 
     def rename_share(self, real_path: str, new_name: str) -> bool:
         """Rename a shared directory's virtual name."""
-        return self._bridge.renameShareDir(real_path, new_name)
+        try:
+            self.shares.renameDirectory(real_path, new_name)
+            return True
+        except Exception:
+            return False
 
     def list_shares(self) -> list:
         """List all shared directories."""
-        return list(self._bridge.listShare())
+        return list(self.shares.getDirectories())
 
     def refresh_share(self) -> None:
         """Refresh shared file lists."""
-        self._bridge.refreshShare()
+        self.shares.setDirty()
+        self.shares.refresh(True, True, False)
 
     @property
     def share_size(self) -> int:
         """Total share size in bytes."""
-        return self._bridge.getShareSize()
+        return self.shares.getShareSize()
 
     @property
     def shared_files(self) -> int:
         """Total number of shared files."""
-        return self._bridge.getSharedFileCount()
+        return self.shares.getSharedFiles()
 
     # ------------------------------------------------------------------
     # Transfers
     # ------------------------------------------------------------------
 
     @property
-    def transfer_stats(self) -> Any:
+    def transfer_stats(self) -> dict:
         """Get aggregate transfer statistics."""
-        return self._bridge.getTransferStats()
+        dl = self.downloads
+        ul = self.uploads
+        return {
+            "download_count": dl.getDownloadCount() if dl else 0,
+            "upload_count": ul.getUploadCount() if ul else 0,
+        }
 
     # ------------------------------------------------------------------
     # Hashing
     # ------------------------------------------------------------------
 
     @property
-    def hash_status(self) -> Any:
+    def hash_status(self) -> dict:
         """Get file hashing status."""
-        return self._bridge.getHashStatus()
+        hm = self.hashing
+        if not hm:
+            return {"current_file": "", "bytes_left": 0, "files_left": 0}
+        try:
+            stats = hm.stats()
+            return {
+                "current_file": stats[0],
+                "bytes_left": stats[1],
+                "files_left": stats[2],
+            }
+        except Exception:
+            return {"current_file": "", "bytes_left": 0, "files_left": 0}
 
     def pause_hashing(self, pause: bool = True) -> None:
         """Pause or resume file hashing."""
-        self._bridge.pauseHashing(pause)
+        if pause:
+            self.hashing.pauseHashing()
+        else:
+            self.hashing.resumeHashing()
 
     # ------------------------------------------------------------------
     # Settings
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _resolve_setting(name: str):
+        """Resolve a setting name to its SettingsManager enum value.
+
+        Tries the name as-is first, then UPPER_CASE (e.g. 'Nick' -> 'NICK',
+        'DownloadDirectory' -> 'DOWNLOAD_DIRECTORY').
+        """
+        attr = getattr(dc_core.SettingsManager, name, None)
+        if attr is not None:
+            return attr
+        # Convert CamelCase / mixedCase to UPPER_SNAKE_CASE
+        import re
+        upper = re.sub(r'(?<=[a-z0-9])(?=[A-Z])', '_', name).upper()
+        return getattr(dc_core.SettingsManager, upper, None)
+
+    @staticmethod
+    def _setting_type(attr: int) -> str:
+        """Return 'str', 'int', 'int64', or 'float' for a setting enum value.
+
+        Uses the SettingsManager boundary constants to determine the type.
+        """
+        SM = dc_core.SettingsManager
+        if attr < SM.INT_FIRST:
+            return "str"
+        if attr < SM.INT64_FIRST:
+            return "int"
+        if attr < SM.FLOAT_FIRST:
+            return "int64"
+        return "float"
+
     def get_setting(self, name: str) -> str:
-        """Get a DC client setting by name."""
-        return self._bridge.getSetting(name)
+        """Get a DC client setting by name.
+
+        Args:
+            name: Setting name (e.g. 'NICK', 'Nick', 'DOWNLOAD_DIRECTORY')
+        """
+        sm = self.settings
+        if not sm:
+            return ""
+        attr = self._resolve_setting(name)
+        if attr is None:
+            return ""
+        # Use typed getters to avoid SWIG overload ambiguity (all enum
+        # types are plain ints in Python, so the first overload always wins).
+        stype = self._setting_type(attr)
+        if stype == "int":
+            return str(sm.getInt(attr))
+        elif stype == "int64":
+            return str(sm.getInt64(attr))
+        elif stype == "float":
+            return str(sm.getFloat(attr))
+        return sm.getStr(attr)
 
     def set_setting(self, name: str, value: str) -> None:
         """Set a DC client setting."""
-        self._bridge.setSetting(name, value)
+        sm = self.settings
+        if not sm:
+            return
+        attr = self._resolve_setting(name)
+        if attr is None:
+            return
+        # Use typed setters to avoid SWIG overload ambiguity — see
+        # get_setting() for rationale.
+        stype = self._setting_type(attr)
+        if stype == "int":
+            sm.setInt(attr, int(value))
+        elif stype == "int64":
+            sm.setInt64(attr, int(value))
+        elif stype == "float":
+            sm.setFloat(attr, float(value))
+        else:
+            sm.setStr(attr, value)
 
     def start_networking(self) -> None:
         """(Re)start the networking stack (connection listeners).
@@ -566,7 +753,9 @@ class DCClient:
 
     def reload_config(self) -> None:
         """Reload configuration from disk."""
-        self._bridge.reloadConfig()
+        sm = self.settings
+        if sm:
+            sm.load()
 
     # ------------------------------------------------------------------
     # Lua scripting

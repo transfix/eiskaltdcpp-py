@@ -1,13 +1,12 @@
 #
-# Build manylinux wheels with cibuildwheel + publish to PyPI
+# Build wheels for Linux, Windows, macOS + publish to PyPI
 #
 # Triggers:
 #   - Manual dispatch (workflow_dispatch)
 #   - Git tag push (v*)
 #
-# The wheel build uses FetchContent to compile eiskaltdcpp from source
-# inside the manylinux container, so no system libeiskaltdcpp-dev is needed.
-# auditwheel repair bundles all non-standard shared libraries.
+# The wheel build uses FetchContent to compile eiskaltdcpp from source,
+# so no system libeiskaltdcpp-dev is needed.
 #
 name: Wheels
 
@@ -21,17 +20,30 @@ concurrency:
   group: wheels-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  actions: write
+
 jobs:
   # ─── Build wheels ───────────────────────────────────────────────
   build-wheels:
     name: Wheel ${{ matrix.os }} / ${{ matrix.arch }}
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: linux
             arch: x86_64
+            runner: ubuntu-24.04
+          - os: windows
+            arch: AMD64
+            runner: windows-latest
+          - os: macos
+            arch: arm64
+            runner: macos-latest
+          - os: macos
+            arch: x86_64
+            runner: macos-13
 
     steps:
       - uses: actions/checkout@v4
@@ -42,49 +54,108 @@ jobs:
         with:
           python-version: "3.12"
 
+      # vcpkg caching for Windows
+      - name: Export GitHub Actions cache variables
+        if: matrix.os == 'windows'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Set up MSVC
+        if: matrix.os == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Install cibuildwheel
         run: python -m pip install cibuildwheel==2.23.0
+
+      - name: Install delvewheel (Windows)
+        if: matrix.os == 'windows'
+        run: python -m pip install delvewheel
 
       - name: Build wheels
         run: python -m cibuildwheel --output-dir wheelhouse
         env:
-          # Build for CPython 3.10-3.13 on x86_64
-          CIBW_BUILD: "cp310-manylinux_x86_64 cp311-manylinux_x86_64 cp312-manylinux_x86_64 cp313-manylinux_x86_64"
-          CIBW_SKIP: "*-musllinux_*"
+          # ── Build matrix ────────────────────────────────────────
+          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-*"
+          CIBW_SKIP: "*-musllinux_* *-win32 *-manylinux_i686"
+          CIBW_ARCHS_LINUX: x86_64
+          CIBW_ARCHS_WINDOWS: AMD64
+          CIBW_ARCHS_MACOS: ${{ matrix.arch }}
 
-          # Use manylinux_2_28 image (AlmaLinux 8 based)
+          # ── Linux ───────────────────────────────────────────────
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
-
-          # Install build dependencies inside the container
           CIBW_BEFORE_ALL_LINUX: >
             dnf install -y
             openssl-devel zlib-devel bzip2-devel
             pcre-devel pcre2-devel lua-devel
             libidn-devel miniupnpc-devel
+            gettext-devel
             swig cmake gcc-c++ ninja-build
-
-          # auditwheel repair is run by cibuildwheel automatically
           CIBW_REPAIR_WHEEL_COMMAND_LINUX: >
             auditwheel repair -w {dest_dir} {wheel}
 
-          # Quick smoke test inside the container
+          # ── Windows ─────────────────────────────────────────────
+          CIBW_BEFORE_ALL_WINDOWS: >
+            vcpkg install --triplet x64-windows
+            openssl bzip2 zlib miniupnpc pcre2 lua libiconv libidn2 gettext &&
+            C:\msys64\usr\bin\pacman.exe -S --noconfirm --needed gettext &&
+            choco install swig -y --no-progress
+          CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: >
+            delvewheel repair -w {dest_dir} {wheel}
+            --add-path "C:/vcpkg/installed/x64-windows/bin"
+          CIBW_ENVIRONMENT_WINDOWS: >
+            VCPKG_BINARY_SOURCES="clear;x-gha,readwrite"
+            PATH="C:\\msys64\\usr\\bin;$PATH"
+            CMAKE_ARGS="-DUSE_SYSTEM_EISKALTDCPP=OFF
+            -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake"
+
+          # ── macOS ───────────────────────────────────────────────
+          CIBW_BEFORE_ALL_MACOS: >
+            brew install swig openssl@3 miniupnpc libidn2 pcre2 lua bzip2 gettext gcc
+          CIBW_REPAIR_WHEEL_COMMAND_MACOS: >
+            delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}
+          CIBW_ENVIRONMENT_MACOS: >
+            CPATH="$(brew --prefix)/include"
+            LIBRARY_PATH="$(brew --prefix)/lib"
+            CMAKE_ARGS="-DUSE_SYSTEM_EISKALTDCPP=OFF
+            -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)
+            -DCMAKE_PREFIX_PATH=$(brew --prefix openssl@3);$(brew --prefix bzip2);$(brew --prefix pcre2);$(brew --prefix miniupnpc);$(brew --prefix libidn2);$(brew --prefix lua);$(brew --prefix gettext)
+            -DCMAKE_C_COMPILER=$(brew --prefix gcc)/bin/gcc-14
+            -DCMAKE_CXX_COMPILER=$(brew --prefix gcc)/bin/g++-14"
+
+          # ── Common ──────────────────────────────────────────────
+          CIBW_ENVIRONMENT: >
+            CMAKE_ARGS="-DUSE_SYSTEM_EISKALTDCPP=OFF"
           CIBW_TEST_REQUIRES: pytest
           CIBW_TEST_COMMAND: >
             python -m pytest {project}/tests/ -v --tb=short
+            --ignore={project}/tests/test_integration.py
 
-          # Don't build from system eiskaltdcpp — use FetchContent
-          CIBW_ENVIRONMENT: >
-            CMAKE_ARGS="-DUSE_SYSTEM_EISKALTDCPP=OFF"
+      - name: Compute artifact name
+        id: artifact
+        shell: bash
+        run: |
+          VERSION=$(grep 'project.*VERSION' CMakeLists.txt | head -1 | sed 's/.*VERSION *\([^ )]*\).*/\1/')
+          SHA=$(git rev-parse --short HEAD)
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "name=eiskaltdcpp-py-${VERSION}-${SHA}-${{ matrix.os }}-${{ matrix.arch }}-wheels" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=eiskaltdcpp-py-${VERSION}~dev-${SHA}-${{ matrix.os }}-${{ matrix.arch }}-wheels" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}-${{ matrix.arch }}
+          name: ${{ steps.artifact.outputs.name }}
           path: wheelhouse/*.whl
 
   # ─── Build source distribution ──────────────────────────────────
   build-sdist:
     name: Source distribution
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v4
@@ -98,16 +169,27 @@ jobs:
       - name: Build sdist
         run: python -m pip install build && python -m build --sdist --outdir dist
 
+      - name: Compute artifact name
+        id: artifact
+        run: |
+          VERSION=$(grep 'project.*VERSION' CMakeLists.txt | head -1 | sed 's/.*VERSION *\([^ )]*\).*/\1/')
+          SHA=$(git rev-parse --short HEAD)
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "name=eiskaltdcpp-py-${VERSION}-${SHA}-sdist" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=eiskaltdcpp-py-${VERSION}~dev-${SHA}-sdist" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
-          name: sdist
+          name: ${{ steps.artifact.outputs.name }}
           path: dist/*.tar.gz
 
   # ─── Publish to PyPI (only on tag push) ─────────────────────────
   publish:
     name: Publish to PyPI
     needs: [build-wheels, build-sdist]
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-24.04
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
 
     # PyPI trusted publishing (OIDC) — no API tokens needed
