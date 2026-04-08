@@ -60,10 +60,6 @@ jobs:
           python -m pip install pytest pytest-asyncio pytest-timeout click \
             fastapi uvicorn[standard] python-jose[cryptography] bcrypt pydantic httpx
 
-      - name: Clean stale FetchContent cache (self-hosted)
-        if: ${{ !contains(toJSON(matrix.runner), 'ubuntu') }}
-        run: rm -rf build/_deps
-
       - name: Configure
         run: |
           cmake -B build \

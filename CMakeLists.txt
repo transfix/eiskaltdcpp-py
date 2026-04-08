@@ -101,6 +101,15 @@ if(USE_SYSTEM_EISKALTDCPP)
         else()
             set(EISKALTDCPP_HAS_LUA FALSE)
         endif()
+
+        # WITH_DHT adds a dht_ unique_ptr member to DCContext, changing
+        # the memory layout.  Detect it via the DHT header.
+        if(EXISTS "${EISKALTDCPP_INCLUDE_DIR}/dht/DHT.h")
+            message(STATUS "System libeiskaltdcpp has DHT support — enabling WITH_DHT for ABI compat")
+            set(EISKALTDCPP_HAS_DHT TRUE)
+        else()
+            set(EISKALTDCPP_HAS_DHT FALSE)
+        endif()
     endif()
 endif()
 
@@ -172,6 +181,16 @@ if(NOT EISKALTDCPP_FOUND)
     else()
         message(WARNING "LUA_SCRIPT enabled but Lua dev headers not found in container — ABI mismatch possible")
         set(EISKALTDCPP_HAS_LUA FALSE)
+    endif()
+
+    # WITH_DHT changes DCContext class layout (adds dht_ unique_ptr member).
+    # The eiskaltdcpp top-level CMakeLists.txt uses add_definitions(-DWITH_DHT)
+    # which only applies within its directory scope, so we must propagate
+    # it ourselves for the bridge ABI to match.
+    if(WITH_DHT)
+        set(EISKALTDCPP_HAS_DHT TRUE)
+    else()
+        set(EISKALTDCPP_HAS_DHT FALSE)
     endif()
 
     set(EISKALTDCPP_FOUND TRUE)
