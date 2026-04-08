@@ -139,6 +139,18 @@ class DCWorker:
             return await self._cmd_resume_hashing()
         elif cmd == "get_hash_status":
             return self._cmd_get_hash_status()
+        elif cmd == "send_pb":
+            return self._cmd_send_pb(args)
+        elif cmd == "send_pb_routed":
+            return self._cmd_send_pb_routed(args)
+        elif cmd == "hub_supports_nmdcpb":
+            return self._cmd_hub_supports_nmdcpb(args)
+        elif cmd == "wait_pb_message":
+            return await self._cmd_wait_pb_message(args)
+        elif cmd == "send_chat_message":
+            return await self._cmd_send_chat_message(args)
+        elif cmd == "get_transfer_stats":
+            return self._cmd_get_transfer_stats()
         elif cmd == "shutdown":
             return await self._cmd_shutdown()
         elif cmd == "ping":
@@ -167,6 +179,7 @@ class DCWorker:
                 "download_starting", "download_complete", "download_failed",
                 "upload_starting", "upload_complete",
                 "queue_item_added", "queue_item_finished", "queue_item_removed",
+                "pb_message",
             ]:
                 self.client.on(event_name, self._make_forwarder(event_name))
 
@@ -352,6 +365,49 @@ class DCWorker:
             "currentFile": hs.currentFile,
             "bytesLeft": hs.bytesLeft,
             "filesLeft": hs.filesLeft,
+        }
+
+    # -- NMDCpb protobuf commands ------------------------------------------
+
+    def _cmd_send_pb(self, args: dict) -> None:
+        self.client.send_pb(args["hub_url"], args["base64data"])
+
+    def _cmd_send_pb_routed(self, args: dict) -> None:
+        self.client.send_pb_routed(
+            args["hub_url"], args["to_nick"], args["base64data"]
+        )
+
+    def _cmd_hub_supports_nmdcpb(self, args: dict) -> bool:
+        return self.client.hub_supports_nmdcpb(args["hub_url"])
+
+    async def _cmd_wait_pb_message(self, args: dict) -> dict:
+        timeout = args.get("timeout", 20)
+        cmd = args.get("cmd")
+        from_nick = args.get("from_nick")
+        msg = await self.client.wait_pb_message(
+            cmd=cmd, from_nick=from_nick, timeout=timeout
+        )
+        return {
+            "hub_url": msg[0],
+            "cmd": msg[1],
+            "nick": msg[2],
+            "data": msg[3],
+        }
+
+    # -- Additional commands for example patterns --------------------------
+
+    async def _cmd_send_chat_message(self, args: dict) -> None:
+        await self.client.send_message(args["hub_url"], args["message"])
+
+    def _cmd_get_transfer_stats(self) -> dict:
+        stats = self.client.transfer_stats
+        return {
+            "downloadSpeed": stats.downloadSpeed,
+            "uploadSpeed": stats.uploadSpeed,
+            "downloadCount": stats.downloadCount,
+            "uploadCount": stats.uploadCount,
+            "totalDownloaded": stats.totalDownloaded,
+            "totalUploaded": stats.totalUploaded,
         }
 
     # -- Lifecycle ---------------------------------------------------------
