@@ -610,6 +610,44 @@ class AsyncDCClient:
         """Send a private message."""
         self._sync_client.send_pm(hub_url, nick, message)
 
+    async def wait_pm(
+        self,
+        *,
+        from_nick: Optional[str] = None,
+        timeout: float = 20.0,
+    ) -> tuple[str, str, str, str]:
+        """
+        Wait for and return a private message.
+
+        Args:
+            from_nick: If specified, only return PMs from this nick
+            timeout: Timeout in seconds
+
+        Returns:
+            Tuple of (hub_url, from_nick, to_nick, message)
+        """
+        deadline = asyncio.get_event_loop().time() + timeout
+        while True:
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                raise asyncio.TimeoutError(
+                    f"No PM received within {timeout}s"
+                    + (f" from {from_nick}" if from_nick else "")
+                )
+            try:
+                pm = await asyncio.wait_for(
+                    self._pm_queue.get(), timeout=remaining
+                )
+                if from_nick is None or pm[1] == from_nick:
+                    return pm
+                # Put it back? No — just keep draining. PMs from other
+                # nicks are still dispatched to event handlers.
+            except asyncio.TimeoutError:
+                raise asyncio.TimeoutError(
+                    f"No PM received within {timeout}s"
+                    + (f" from {from_nick}" if from_nick else "")
+                )
+
     # ------------------------------------------------------------------
     # NMDCpb protobuf messaging
     # ------------------------------------------------------------------

@@ -694,6 +694,7 @@ _SAMPLE_ARGS: dict[str, tuple] = {
     "upload_starting": ("/share/file.bin", "Bob", 4096),
     "upload_complete": ("/share/file.bin", "Bob", 4096),
     "hash_progress": ("/data/video.mkv", 7, 5000000),
+    "pb_message": ("nmdcs://hub:411", "$PB", "Alice", "c29tZWRhdGE="),
 }
 
 
