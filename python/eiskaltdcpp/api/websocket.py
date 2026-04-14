@@ -24,6 +24,8 @@ from starlette.websockets import WebSocketState
 from eiskaltdcpp.api.auth import AuthManager, UserRecord
 from eiskaltdcpp.api.dependencies import get_auth_manager, get_dc_client
 from eiskaltdcpp.api.models import UserRole
+from eiskaltdcpp.event_meta import EVENT_ARG_NAMES
+from eiskaltdcpp.hub_aliases import reverse_lookup as _alias_for_url
 
 logger = logging.getLogger(__name__)
 
@@ -77,36 +79,13 @@ EVENT_CHANNELS: dict[str, set[Channel]] = {
     "upload_complete": {Channel.transfers, Channel.events},
     # Hash events
     "hash_progress": {Channel.transfers, Channel.events},
+    # NMDCpb protobuf events
+    "pb_message": {Channel.chat, Channel.events},
 }
 
-# Argument names for each event type (for serialization)
-EVENT_ARG_NAMES: dict[str, tuple[str, ...]] = {
-    "hub_connecting": ("hub_url",),
-    "hub_connected": ("hub_url", "hub_name"),
-    "hub_disconnected": ("hub_url", "reason"),
-    "hub_redirect": ("hub_url", "new_url"),
-    "hub_get_password": ("hub_url",),
-    "hub_updated": ("hub_url", "hub_name"),
-    "hub_nick_taken": ("hub_url",),
-    "hub_full": ("hub_url",),
-    "chat_message": ("hub_url", "nick", "message", "third_person"),
-    "private_message": ("hub_url", "from_nick", "to_nick", "message"),
-    "status_message": ("hub_url", "message"),
-    "user_connected": ("hub_url", "nick"),
-    "user_disconnected": ("hub_url", "nick"),
-    "user_updated": ("hub_url", "nick"),
-    "search_result": ("hub_url", "file", "size", "free_slots", "total_slots",
-                       "tth", "nick", "is_directory"),
-    "queue_item_added": ("target", "size", "tth"),
-    "queue_item_finished": ("target", "size"),
-    "queue_item_removed": ("target",),
-    "download_starting": ("target", "nick", "size"),
-    "download_complete": ("target", "nick", "size", "speed"),
-    "download_failed": ("target", "reason"),
-    "upload_starting": ("file", "nick", "size"),
-    "upload_complete": ("file", "nick", "size"),
-    "hash_progress": ("current_file", "files_left", "bytes_left"),
-}
+# Re-export EVENT_ARG_NAMES for backward compatibility
+__all__ = ["EVENT_ARG_NAMES", "EVENT_CHANNELS", "Channel", "ConnectionManager",
+           "_serialize_event", "ws_manager"]
 
 
 def _serialize_event(event_type: str, args: tuple) -> dict:
@@ -116,6 +95,11 @@ def _serialize_event(event_type: str, args: tuple) -> dict:
     for i, name in enumerate(names):
         if i < len(args):
             data[name] = args[i]
+    # Enrich with hub alias when the event carries a hub_url
+    if "hub_url" in data:
+        alias = _alias_for_url(data["hub_url"])
+        if alias is not None:
+            data["hub_alias"] = alias
     return {
         "type": "event",
         "event": event_type,

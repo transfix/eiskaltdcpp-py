@@ -33,6 +33,7 @@ from eiskaltdcpp.api.websocket import (
     _serialize_event,
     ws_manager,
 )
+from eiskaltdcpp.event_meta import EVENT_ARG_NAMES as _EVENT_ARG_NAMES_SHARED
 
 
 # ============================================================================
@@ -49,7 +50,7 @@ class MockDCClient:
 
     def __init__(self):
         self.is_initialized = True
-        self.version = "2.4.2-test"
+        self.version = "2.5.0.0-test"
         self._hubs = []
         self._queue = []
         self._share_size = 1024
@@ -369,6 +370,40 @@ class TestSerializeEvent:
         dt = datetime.fromisoformat(ts)
         assert dt.year >= 2025
 
+    def test_hub_alias_injected_when_present(self, tmp_path, monkeypatch):
+        """Events with hub_url include hub_alias when an alias exists."""
+        hubs_file = tmp_path / "hubs.json"
+        monkeypatch.setenv("EISPY_HUBS_FILE", str(hubs_file))
+        from eiskaltdcpp.hub_aliases import add_alias
+        add_alias("winter", "nmdcs://wintermute:411")
+
+        result = _serialize_event(
+            "hub_connected", ("nmdcs://wintermute:411", "Wintermute")
+        )
+        assert result["data"]["hub_url"] == "nmdcs://wintermute:411"
+        assert result["data"]["hub_alias"] == "winter"
+
+    def test_hub_alias_absent_when_no_alias(self, tmp_path, monkeypatch):
+        """Events with hub_url omit hub_alias when no alias is defined."""
+        hubs_file = tmp_path / "hubs.json"
+        monkeypatch.setenv("EISPY_HUBS_FILE", str(hubs_file))
+
+        result = _serialize_event(
+            "hub_connected", ("dchub://unknown:411", "NoAlias")
+        )
+        assert result["data"]["hub_url"] == "dchub://unknown:411"
+        assert "hub_alias" not in result["data"]
+
+    def test_hub_alias_not_added_to_non_hub_events(self, tmp_path, monkeypatch):
+        """Events without hub_url (e.g. queue/transfer) never get hub_alias."""
+        hubs_file = tmp_path / "hubs.json"
+        monkeypatch.setenv("EISPY_HUBS_FILE", str(hubs_file))
+
+        result = _serialize_event(
+            "download_complete", ("/tmp/file.bin", "user1", 1024, 500.0)
+        )
+        assert "hub_alias" not in result["data"]
+
 
 # ============================================================================
 # Unit tests: ConnectionManager
@@ -624,3 +659,283 @@ class TestWebSocketEndpoint:
             assert "events" in msg["channels"]
             assert "bogus" not in msg["channels"]
             assert "fake" not in msg["channels"]
+
+
+# ============================================================================
+# Parametrized serialization: every event type round-trips correctly
+# ============================================================================
+
+# Sample args for each event type — one representative value per argument.
+_SAMPLE_ARGS: dict[str, tuple] = {
+    "hub_connecting": ("dchub://hub:411",),
+    "hub_connected": ("dchub://hub:411", "TestHub"),
+    "hub_disconnected": ("dchub://hub:411", "Timeout"),
+    "hub_redirect": ("dchub://old:411", "dchub://new:411"),
+    "hub_get_password": ("dchub://hub:411",),
+    "hub_updated": ("dchub://hub:411", "NewName"),
+    "hub_nick_taken": ("dchub://hub:411",),
+    "hub_full": ("dchub://hub:411",),
+    "chat_message": ("dchub://hub:411", "Alice", "Hello!", False),
+    "private_message": ("dchub://hub:411", "Alice", "Bob", "Secret"),
+    "status_message": ("dchub://hub:411", "Connected"),
+    "user_connected": ("dchub://hub:411", "Alice"),
+    "user_disconnected": ("dchub://hub:411", "Alice"),
+    "user_updated": ("dchub://hub:411", "Alice"),
+    "search_result": (
+        "dchub://hub:411", "/share/file.mp3", 1048576,
+        3, 5, "TTHAAABBB", "Alice", False,
+    ),
+    "queue_item_added": ("/dl/file.bin", 2048, "TTH123"),
+    "queue_item_finished": ("/dl/file.bin", 2048),
+    "queue_item_removed": ("/dl/file.bin",),
+    "download_starting": ("/dl/file.bin", "Alice", 2048),
+    "download_complete": ("/dl/file.bin", "Alice", 2048, 102400),
+    "download_failed": ("/dl/file.bin", "No slots"),
+    "upload_starting": ("/share/file.bin", "Bob", 4096),
+    "upload_complete": ("/share/file.bin", "Bob", 4096),
+    "hash_progress": ("/data/video.mkv", 7, 5000000),
+    "pb_message": ("nmdcs://hub:411", "$PB", "Alice", "c29tZWRhdGE="),
+}
+
+
+class TestSerializeAllEvents:
+    """Parametrized serialization tests for every event type."""
+
+    @pytest.mark.parametrize("event_type", sorted(EVENT_ARG_NAMES.keys()))
+    def test_serialize_round_trip(self, event_type):
+        """Serialize an event, then verify every arg is in the output."""
+        args = _SAMPLE_ARGS[event_type]
+        result = _serialize_event(event_type, args)
+
+        assert result["type"] == "event"
+        assert result["event"] == event_type
+        assert "timestamp" in result
+
+        # Every named arg should appear in data with correct value
+        arg_names = EVENT_ARG_NAMES[event_type]
+        assert len(arg_names) == len(args), (
+            f"{event_type}: arg count mismatch "
+            f"({len(arg_names)} names vs {len(args)} values)"
+        )
+        for name, value in zip(arg_names, args):
+            assert result["data"][name] == value, (
+                f"{event_type}.{name}: expected {value!r}, "
+                f"got {result['data'].get(name)!r}"
+            )
+
+    @pytest.mark.parametrize("event_type", sorted(EVENT_ARG_NAMES.keys()))
+    def test_sample_args_match_arg_names(self, event_type):
+        """Ensure _SAMPLE_ARGS has the right arity for every event."""
+        expected = len(EVENT_ARG_NAMES[event_type])
+        actual = len(_SAMPLE_ARGS[event_type])
+        assert actual == expected, (
+            f"{event_type}: _SAMPLE_ARGS has {actual} args, "
+            f"EVENT_ARG_NAMES expects {expected}"
+        )
+
+    def test_all_events_have_sample_args(self):
+        """Every event in EVENT_ARG_NAMES should have sample args."""
+        missing = set(EVENT_ARG_NAMES) - set(_SAMPLE_ARGS)
+        assert not missing, f"Missing sample args for: {missing}"
+
+    def test_event_meta_matches_websocket(self):
+        """event_meta.EVENT_ARG_NAMES and websocket.EVENT_ARG_NAMES agree."""
+        assert EVENT_ARG_NAMES == _EVENT_ARG_NAMES_SHARED
+
+
+# ============================================================================
+# End-to-end: event bridge forwards to WebSocket subscribers
+# ============================================================================
+
+class _MockAsyncDCClient:
+    """Mock DC client that supports events() for the event bridge."""
+
+    def __init__(self):
+        self._event_queue: asyncio.Queue = asyncio.Queue()
+        self._share_size = 0
+        self._shared_files = 0
+
+    def inject_event(self, event_name: str, args: tuple) -> None:
+        """Push an event into the stream (call from tests)."""
+        self._event_queue.put_nowait((event_name, args))
+
+    def events(self, maxsize: int = 5000):
+        return _MockEventStream(self._event_queue)
+
+    def list_hubs(self):
+        return []
+
+    def list_queue(self):
+        return []
+
+    @property
+    def share_size(self):
+        return self._share_size
+
+    @property
+    def shared_files(self):
+        return self._shared_files
+
+    @property
+    def transfer_stats(self):
+        class _S:
+            downloadSpeed = 0
+            uploadSpeed = 0
+        return _S()
+
+
+class _MockEventStream:
+    """Async iterator backed by an asyncio.Queue."""
+
+    def __init__(self, queue: asyncio.Queue):
+        self._queue = queue
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        return await self._queue.get()
+
+    async def close(self):
+        pass
+
+
+class TestEventBridgeE2E:
+    """End-to-end tests: DC events → bridge → WebSocket client."""
+
+    @pytest.mark.asyncio
+    async def test_event_reaches_websocket_subscriber(self):
+        """Fire a hub_connected event and verify a WS client receives it."""
+        mgr = ConnectionManager()
+        mock_dc = _MockAsyncDCClient()
+
+        # Collect messages sent to the mock WebSocket
+        received: list[dict] = []
+        ws = AsyncMock()
+        ws.client_state = WebSocketState.CONNECTED
+
+        async def capture(text):
+            received.append(json.loads(text))
+
+        ws.send_text = AsyncMock(side_effect=capture)
+
+        user = UserRecord(username="e2e", hashed_password="x",
+                          role=UserRole.admin)
+        conn = await mgr.connect(ws, user, {Channel.events})
+
+        # Start bridge
+        mgr._event_stream_task = asyncio.create_task(
+            mgr._event_bridge_loop(mock_dc)
+        )
+
+        # Inject event
+        mock_dc.inject_event("hub_connected", ("dchub://test:411", "TestHub"))
+        await asyncio.sleep(0.05)
+
+        # Verify
+        assert len(received) >= 1
+        msg = received[0]
+        assert msg["type"] == "event"
+        assert msg["event"] == "hub_connected"
+        assert msg["data"]["hub_url"] == "dchub://test:411"
+        assert msg["data"]["hub_name"] == "TestHub"
+
+        mgr.stop_event_bridge()
+        await mgr.disconnect(conn)
+
+    @pytest.mark.asyncio
+    async def test_channel_filtering_in_bridge(self):
+        """Events are only delivered to clients subscribed to the right channel."""
+        mgr = ConnectionManager()
+        mock_dc = _MockAsyncDCClient()
+
+        chat_msgs: list[dict] = []
+        search_msgs: list[dict] = []
+
+        ws_chat = AsyncMock()
+        ws_chat.client_state = WebSocketState.CONNECTED
+        ws_chat.send_text = AsyncMock(
+            side_effect=lambda t: chat_msgs.append(json.loads(t))
+        )
+
+        ws_search = AsyncMock()
+        ws_search.client_state = WebSocketState.CONNECTED
+        ws_search.send_text = AsyncMock(
+            side_effect=lambda t: search_msgs.append(json.loads(t))
+        )
+
+        user = UserRecord(username="e2e", hashed_password="x",
+                          role=UserRole.admin)
+        conn_chat = await mgr.connect(ws_chat, user, {Channel.chat})
+        conn_search = await mgr.connect(ws_search, user, {Channel.search})
+
+        mgr._event_stream_task = asyncio.create_task(
+            mgr._event_bridge_loop(mock_dc)
+        )
+
+        # Inject chat event — should go to chat subscriber only
+        mock_dc.inject_event(
+            "chat_message", ("dchub://h:411", "Alice", "Hi", False)
+        )
+        await asyncio.sleep(0.05)
+
+        assert len(chat_msgs) == 1
+        assert chat_msgs[0]["event"] == "chat_message"
+        assert len(search_msgs) == 0
+
+        # Inject search event — should go to search subscriber only
+        mock_dc.inject_event(
+            "search_result",
+            ("dchub://h:411", "file.mp3", 1024, 2, 4, "TTH", "Bob", False),
+        )
+        await asyncio.sleep(0.05)
+
+        assert len(search_msgs) == 1
+        assert search_msgs[0]["event"] == "search_result"
+        assert len(chat_msgs) == 1  # unchanged
+
+        mgr.stop_event_bridge()
+        await mgr.disconnect(conn_chat)
+        await mgr.disconnect(conn_search)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("event_type", sorted(EVENT_ARG_NAMES.keys()))
+    async def test_every_event_forwarded_through_bridge(self, event_type):
+        """Every known event type is forwarded through the bridge to a WS client."""
+        mgr = ConnectionManager()
+        mock_dc = _MockAsyncDCClient()
+
+        received: list[dict] = []
+        ws = AsyncMock()
+        ws.client_state = WebSocketState.CONNECTED
+        ws.send_text = AsyncMock(
+            side_effect=lambda t: received.append(json.loads(t))
+        )
+
+        user = UserRecord(username="e2e", hashed_password="x",
+                          role=UserRole.admin)
+        conn = await mgr.connect(ws, user, {Channel.events})
+
+        mgr._event_stream_task = asyncio.create_task(
+            mgr._event_bridge_loop(mock_dc)
+        )
+
+        args = _SAMPLE_ARGS[event_type]
+        mock_dc.inject_event(event_type, args)
+        await asyncio.sleep(0.05)
+
+        assert len(received) >= 1, f"No message received for {event_type}"
+        msg = received[0]
+        assert msg["type"] == "event"
+        assert msg["event"] == event_type
+
+        # Verify all args survived the round trip
+        arg_names = EVENT_ARG_NAMES[event_type]
+        for name, value in zip(arg_names, args):
+            assert msg["data"][name] == value, (
+                f"{event_type}.{name}: expected {value!r}, "
+                f"got {msg['data'].get(name)!r}"
+            )
+
+        mgr.stop_event_bridge()
+        await mgr.disconnect(conn)

@@ -15,13 +15,17 @@ concurrency:
 
 jobs:
   build-and-test:
-    runs-on: [self-hosted, linux, x64]
-
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.12"]
         build-type: [Release]
+        runner:
+          - ubuntu-24.04
+          - [self-hosted, linux, x64]
+
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ !contains(toJSON(matrix.runner), 'ubuntu') }}
 
     steps:
       - name: Checkout
@@ -38,10 +42,16 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential \
+            build-essential gettext \
             cmake swig python3-dev \
             libssl-dev zlib1g-dev libbz2-dev \
-            libeiskaltdcpp-dev \
+            libminiupnpc-dev libidn2-dev libpcre2-dev \
+            liblua5.4-dev || \
+          sudo apt-get install -y --no-install-recommends \
+            build-essential gettext \
+            cmake swig python3-dev \
+            libssl-dev zlib1g-dev libbz2-dev \
+            libminiupnpc-dev libidn2-dev libpcre2-dev \
             liblua5.3-dev
 
       - name: Install Python dependencies
@@ -54,6 +64,7 @@ jobs:
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
+            -DUSE_SYSTEM_EISKALTDCPP=OFF \
             -DBUILD_TESTS=ON \
             -DPython3_EXECUTABLE=$(which python)
 
@@ -69,9 +80,217 @@ jobs:
           PYTHONPATH=build/python python -m pytest tests/ -v --tb=short \
             --ignore=tests/test_integration.py
 
+      - name: Compute artifact name
+        id: artifact
+        run: |
+          VERSION=$(grep 'project.*VERSION' CMakeLists.txt | head -1 | sed 's/.*VERSION *\([^ )]*\).*/\1/')
+          SHA=$(git rev-parse --short HEAD)
+          ARCH=$(uname -m)
+          if ${{ contains(toJSON(matrix.runner), 'ubuntu') }}; then
+            OS=linux
+          else
+            OS=linux-selfhosted
+          fi
+          PYVER=$(echo "${{ matrix.python-version }}" | tr -d '.')
+          echo "name=eiskaltdcpp-py-${VERSION}~dev-${SHA}-${OS}-${ARCH}-py${PYVER}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifact
+        if: contains(toJSON(matrix.runner), 'ubuntu')
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: build/python/
+          retention-days: 14
+
+  build-and-test-windows:
+    name: Windows (${{ matrix.python-version }})
+    runs-on: windows-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+
+    env:
+      VCPKG_DEFAULT_TRIPLET: x64-windows
+      VCPKG_BINARY_SOURCES: 'clear;x-gha,readwrite'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install vcpkg dependencies
+        run: |
+          vcpkg install --triplet x64-windows `
+            openssl bzip2 zlib miniupnpc pcre2 lua `
+            libiconv libidn2 gettext
+
+      - name: Install gettext tools (MSYS2)
+        shell: pwsh
+        run: |
+          # vcpkg provides libintl for linking; MSYS2 provides the CLI tools
+          # (xgettext, msgfmt, msgmerge, etc.) needed by FindGettext.cmake
+          C:\msys64\usr\bin\pacman.exe -S --noconfirm --needed gettext
+          echo "C:\msys64\usr\bin" >> $env:GITHUB_PATH
+
+      - name: Install SWIG
+        run: choco install swig -y --no-progress
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest pytest-asyncio pytest-timeout click `
+            fastapi "uvicorn[standard]" "python-jose[cryptography]" bcrypt pydantic httpx
+
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DUSE_SYSTEM_EISKALTDCPP=OFF `
+            -DBUILD_TESTS=ON `
+            -DPython3_EXECUTABLE="$(Get-Command python | Select-Object -ExpandProperty Source)"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run tests (CTest)
+        working-directory: build
+        run: |
+          $env:PATH = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin;$($env:PATH -replace 'C:\\msys64\\usr\\bin;?','')"
+          ctest --output-on-failure
+
+      - name: Run tests (pytest direct)
+        run: |
+          # Ensure vcpkg DLLs are found before any MSYS2 DLLs (ABI mismatch).
+          # MSYS2's libintl-8.dll (MinGW ABI) shadows vcpkg's (MSVC ABI) and
+          # causes a hard crash inside dcpp::startup() → bindtextdomain().
+          $env:PATH = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin;$($env:PATH -replace 'C:\\msys64\\usr\\bin;?','')"
+          $env:PYTHONPATH = "build/python"
+          python -m pytest tests/ -v -s --tb=short `
+            --ignore=tests/test_integration.py `
+            --ignore=tests/test_file_transfer.py
+
+      - name: Compute artifact name
+        id: artifact
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path CMakeLists.txt -Pattern 'project.*VERSION\s+([^ )]+)').Matches[0].Groups[1].Value
+          $sha = git rev-parse --short HEAD
+          $pyver = '${{ matrix.python-version }}' -replace '\.',''
+          $name = "eiskaltdcpp-py-${version}~dev-${sha}-windows-x64-py${pyver}"
+          echo "name=$name" >> $env:GITHUB_OUTPUT
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: build/python/
+          retention-days: 14
+
+  build-and-test-macos:
+    name: macOS (${{ matrix.python-version }})
+    runs-on: macos-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install system dependencies
+        run: |
+          brew install cmake swig openssl@3 miniupnpc libidn2 pcre2 lua bzip2 gettext gcc
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest pytest-asyncio pytest-timeout click \
+            fastapi "uvicorn[standard]" "python-jose[cryptography]" bcrypt pydantic httpx
+
+      - name: Configure
+        run: |
+          # Apple Clang lacks std::jthread — use Homebrew GCC for full C++20
+          GCC_VER=$(ls /opt/homebrew/bin/g++-* 2>/dev/null | grep -oE '[0-9]+$' | sort -n | tail -1)
+          # Homebrew GCC doesn't search Homebrew paths by default
+          BREW_PREFIX=$(brew --prefix)
+          export CPATH="${BREW_PREFIX}/include"
+          export LIBRARY_PATH="${BREW_PREFIX}/lib"
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="$(brew --prefix gcc)/bin/gcc-${GCC_VER}" \
+            -DCMAKE_CXX_COMPILER="$(brew --prefix gcc)/bin/g++-${GCC_VER}" \
+            -DUSE_SYSTEM_EISKALTDCPP=OFF \
+            -DBUILD_TESTS=ON \
+            -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix openssl@3);$(brew --prefix bzip2);$(brew --prefix pcre2);$(brew --prefix miniupnpc);$(brew --prefix libidn2);$(brew --prefix lua);$(brew --prefix gettext)" \
+            -DPython3_EXECUTABLE=$(which python)
+
+      - name: Build
+        run: |
+          BREW_PREFIX=$(brew --prefix)
+          export CPATH="${BREW_PREFIX}/include"
+          export LIBRARY_PATH="${BREW_PREFIX}/lib"
+          cmake --build build -j$(sysctl -n hw.ncpu)
+
+      - name: Run tests (CTest)
+        working-directory: build
+        run: ctest --output-on-failure -j$(sysctl -n hw.ncpu)
+
+      - name: Run tests (pytest direct)
+        run: |
+          PYTHONPATH=build/python python -m pytest tests/ -v --tb=short \
+            --ignore=tests/test_integration.py \
+            --ignore=tests/test_file_transfer.py
+
+      - name: Compute artifact name
+        id: artifact
+        run: |
+          VERSION=$(grep 'project.*VERSION' CMakeLists.txt | head -1 | sed 's/.*VERSION *\([^ )]*\).*/\1/')
+          SHA=$(git rev-parse --short HEAD)
+          ARCH=$(uname -m)
+          PYVER=$(echo "${{ matrix.python-version }}" | tr -d '.')
+          echo "name=eiskaltdcpp-py-${VERSION}~dev-${SHA}-macos-${ARCH}-py${PYVER}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: build/python/
+          retention-days: 14
+
   integration:
     name: Integration tests
-    needs: build-and-test
+    needs:
+      - build-and-test
+      - build-and-test-windows
+      - build-and-test-macos
     runs-on: [self-hosted, linux, x64]
     timeout-minutes: 15
 
@@ -93,10 +312,16 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential \
+            build-essential gettext \
             cmake swig python3-dev \
             libssl-dev zlib1g-dev libbz2-dev \
-            libeiskaltdcpp-dev \
+            libminiupnpc-dev libidn2-dev libpcre2-dev \
+            liblua5.4-dev || \
+          sudo apt-get install -y --no-install-recommends \
+            build-essential gettext \
+            cmake swig python3-dev \
+            libssl-dev zlib1g-dev libbz2-dev \
+            libminiupnpc-dev libidn2-dev libpcre2-dev \
             liblua5.3-dev
 
       - name: Install Python dependencies
@@ -109,6 +334,7 @@ jobs:
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
+            -DUSE_SYSTEM_EISKALTDCPP=OFF \
             -DBUILD_TESTS=ON \
             -DPython3_EXECUTABLE=$(which python)
           cmake --build build -j$(nproc)
@@ -117,6 +343,7 @@ jobs:
         env:
           PYTHONPATH: build/python
         run: |
-          python -m pytest tests/test_integration.py \
+          python -m pytest tests/test_integration.py tests/test_file_transfer.py \
+            tests/test_examples_integration.py \
             -v --tb=long --timeout=300 -x \
             -o "addopts="

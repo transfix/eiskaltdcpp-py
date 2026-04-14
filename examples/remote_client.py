@@ -33,7 +33,7 @@ async def demo_status(client):
     print(f"Uptime         : {status.get('uptime_seconds', 0):.0f}s")
     print()
 
-    hubs = await client.list_hubs_async()
+    hubs = await client.list_hubs()
     if hubs:
         print(f"Connected hubs ({len(hubs)}):")
         for h in hubs:
@@ -51,7 +51,7 @@ async def demo_connect(client, hub_url: str):
     # Give the hub a moment to populate the user list
     await asyncio.sleep(3)
 
-    users = await client.get_users_async(hub_url)
+    users = await client.get_users(hub_url)
     print(f"Users on {hub_url} ({len(users)}):")
     for u in users[:20]:  # first 20
         share_mb = u.share_size / (1024 * 1024)
@@ -64,12 +64,12 @@ async def demo_connect(client, hub_url: str):
 async def demo_search(client, query: str):
     """Run a search and display results."""
     print(f"Searching for '{query}' ...")
-    await client.search_async(query)
+    await client.search(query)
 
     # Wait for results to trickle in
     await asyncio.sleep(5)
 
-    results = await client.get_search_results_async()
+    results = await client.get_search_results()
     print(f"Search results ({len(results)}):")
     for r in results[:15]:
         size_mb = r.size / (1024 * 1024)
@@ -81,7 +81,7 @@ async def demo_search(client, query: str):
 
 async def demo_shares(client):
     """List shared directories."""
-    shares = await client.list_shares_async()
+    shares = await client.list_shares()
     if shares:
         print(f"Shared directories ({len(shares)}):")
         for s in shares:
@@ -94,7 +94,7 @@ async def demo_shares(client):
 
 async def demo_queue(client):
     """List the download queue."""
-    queue = await client.list_queue_async()
+    queue = await client.list_queue()
     if queue:
         print(f"Download queue ({len(queue)}):")
         for q in queue:

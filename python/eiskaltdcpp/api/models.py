@@ -339,3 +339,187 @@ class LuaScriptsResponse(BaseModel):
     """List of Lua scripts."""
     scripts_path: str
     scripts: list[str]
+
+
+# ============================================================================
+# Favorites models
+# ============================================================================
+
+class FavoriteHubInfo(BaseModel):
+    """Information about a favorite hub."""
+    name: str = ""
+    server: str = ""
+    description: str = ""
+    nick: str = ""
+    password: str = ""
+    encoding: str = ""
+    group: str = ""
+    connect: bool = False
+
+
+class FavoriteHubAdd(BaseModel):
+    """Add a favorite hub."""
+    name: str = Field(..., min_length=1)
+    server: str = Field(..., min_length=1)
+    description: str = ""
+    nick: str = ""
+    password: str = ""
+    encoding: str = ""
+    group: str = ""
+
+
+class FavoriteHubList(BaseModel):
+    """List of favorite hubs."""
+    hubs: list[FavoriteHubInfo]
+    total: int
+
+
+class FavoriteUserInfo(BaseModel):
+    """Information about a favorite user."""
+    nick: str = ""
+    url: str = ""
+    description: str = ""
+    last_seen: int = 0
+
+
+class FavoriteUserList(BaseModel):
+    """List of favorite users."""
+    users: list[FavoriteUserInfo]
+    total: int
+
+
+class FavoriteDirInfo(BaseModel):
+    """A favorite directory."""
+    name: str
+    path: str
+
+
+class FavoriteDirAdd(BaseModel):
+    """Add a favorite directory."""
+    path: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1)
+
+
+class FavoriteDirList(BaseModel):
+    """List of favorite directories."""
+    dirs: list[FavoriteDirInfo]
+    total: int
+
+
+# ============================================================================
+# Throttle / bandwidth models
+# ============================================================================
+
+class ThrottleStatus(BaseModel):
+    """Current bandwidth limits."""
+    upload_limit: int = Field(0, description="Upload limit in KiB/s (0=unlimited)")
+    download_limit: int = Field(0, description="Download limit in KiB/s (0=unlimited)")
+
+
+class ThrottleUpdate(BaseModel):
+    """Set bandwidth limits."""
+    upload_limit: Optional[int] = Field(None, ge=0, description="Upload limit KiB/s")
+    download_limit: Optional[int] = Field(None, ge=0, description="Download limit KiB/s")
+
+
+# ============================================================================
+# Connectivity models
+# ============================================================================
+
+class ConnectivityStatus(BaseModel):
+    """Connection detection status."""
+    running: bool = False
+    mapping_opened: bool = False
+
+
+# ============================================================================
+# Crypto / TLS models
+# ============================================================================
+
+class CryptoStatus(BaseModel):
+    """TLS / certificate status."""
+    tls_ok: bool = False
+
+
+# ============================================================================
+# Log models
+# ============================================================================
+
+class LogEntry(BaseModel):
+    """A log message."""
+    area: str = ""
+    message: str = ""
+
+
+class LogPath(BaseModel):
+    """Log file path for an area."""
+    area: str
+    path: str
+
+
+# ============================================================================
+# Finished transfer models
+# ============================================================================
+
+class FinishedTransferInfo(BaseModel):
+    """A finished transfer entry."""
+    target: str = ""
+
+
+class FinishedTransferList(BaseModel):
+    """List of finished transfers."""
+    items: list[FinishedTransferInfo]
+    total: int
+
+
+# ============================================================================
+# IP Filter models
+# ============================================================================
+
+class IPFilterRule(BaseModel):
+    """An IP filter rule."""
+    pattern: str = Field(..., min_length=1)
+    direction: int = Field(0, ge=0, le=2,
+                           description="0=both, 1=in, 2=out")
+
+
+class IPFilterCheck(BaseModel):
+    """Check an IP against rules."""
+    ip: str = Field(..., min_length=1)
+    direction: int = Field(0, ge=0, le=2)
+
+
+class IPFilterCheckResult(BaseModel):
+    """Result of IP filter check."""
+    ip: str
+    allowed: bool
+
+
+# ============================================================================
+# ADL Search models
+# ============================================================================
+
+class ADLSearchEntry(BaseModel):
+    """An ADL search entry."""
+    search_string: str = ""
+    is_active: bool = True
+    source_type: int = 0
+    dest_directory: str = ""
+    min_file_size: int = -1
+    max_file_size: int = -1
+
+
+class ADLSearchAdd(BaseModel):
+    """Add an ADL search entry."""
+    search_string: str = Field(..., min_length=1)
+    is_active: bool = True
+    source_type: int = Field(0, ge=0, le=4)
+    dest_directory: str = ""
+    min_file_size: int = -1
+    max_file_size: int = -1
+
+
+class ADLSearchList(BaseModel):
+    """List of ADL search entries."""
+    searches: list[ADLSearchEntry]
+    total: int
