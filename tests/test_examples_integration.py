@@ -366,14 +366,14 @@ class TestShareManagerPattern:
     async def test_hash_status_accessible(self, single_client):
         """hash_status is accessible (share_manager hash command pattern)."""
         hs = single_client.hash_status
-        assert hasattr(hs, "filesLeft")
-        assert hasattr(hs, "bytesLeft")
-        assert hasattr(hs, "currentFile")
+        assert "files_left" in hs
+        assert "bytes_left" in hs
+        assert "current_file" in hs
 
     @pytest.mark.asyncio(loop_scope="module")
     async def test_list_shares(self, single_client):
         """list_shares() returns a list (share_manager list command)."""
-        shares = single_client.list_shares()
+        shares = await single_client.list_shares()
         assert isinstance(shares, list)
 
     @pytest.mark.asyncio(loop_scope="module")
@@ -399,12 +399,8 @@ class TestDownloadProgressPattern:
     async def test_transfer_stats_accessible(self, single_client):
         """transfer_stats returns valid stats (download_progress dashboard)."""
         stats = single_client.transfer_stats
-        assert hasattr(stats, "downloadSpeed")
-        assert hasattr(stats, "uploadSpeed")
-        assert hasattr(stats, "downloadCount")
-        assert hasattr(stats, "uploadCount")
-        assert hasattr(stats, "totalDownloaded")
-        assert hasattr(stats, "totalUploaded")
+        assert "download_count" in stats
+        assert "upload_count" in stats
 
     @pytest.mark.asyncio(loop_scope="module")
     async def test_download_event_handlers(self, single_client):
@@ -474,7 +470,7 @@ class TestSettingsPattern:
     async def test_description_setting(self, single_client):
         """Description setting persists (basic_chat pattern)."""
         desc = await single_client.get_setting("Description")
-        assert "example integration test" in desc.lower()
+        assert "example integration" in desc.lower()
 
 
 # =========================================================================

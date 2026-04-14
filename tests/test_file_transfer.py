@@ -16,6 +16,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import os
+import socket
 import shutil
 import tempfile
 from pathlib import Path
@@ -47,9 +49,66 @@ from test_integration import (
 
 logger = logging.getLogger(__name__)
 
+
+def _direct_connectivity_available() -> bool:
+    """Check if this machine can accept inbound TCP from its public IP.
+
+    File transfer tests require at least one bot to be directly reachable
+    (active mode).  When both bots are behind NAT without port forwarding
+    the hub rewrites the IP in $ConnectToMe to the public address but the
+    connection times out because no port is forwarded.
+
+    Returns True when the env-var DC_FILE_TRANSFER=1 is set (opt-in) or
+    when a quick loopback-via-public-IP test succeeds (hairpin NAT / port
+    forwarding).
+    """
+    if os.environ.get("DC_FILE_TRANSFER", "").strip() == "1":
+        return True
+
+    import urllib.request
+
+    # Discover our public IPv4.
+    try:
+        ext_ip = urllib.request.urlopen(
+            "https://api.ipify.org", timeout=5,
+        ).read().decode().strip()
+    except Exception:
+        return False
+
+    # Open a temp listener and try to reach it via the public IP.
+    try:
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("0.0.0.0", 0))
+        srv.listen(1)
+        port = srv.getsockname()[1]
+        srv.settimeout(3)
+
+        cli = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        cli.settimeout(2)
+        try:
+            cli.connect((ext_ip, port))
+            srv.accept()
+            reachable = True
+        except OSError:
+            reachable = False
+        finally:
+            cli.close()
+            srv.close()
+        return reachable
+    except OSError:
+        return False
+
+
+_DIRECT_OK = _direct_connectivity_available()
+
 pytestmark = [
     pytest.mark.skipif(not SWIG_AVAILABLE, reason="dc_core SWIG module not built"),
     pytest.mark.skipif(pytest_asyncio is None, reason="pytest-asyncio not installed"),
+    pytest.mark.skipif(
+        not _DIRECT_OK,
+        reason="no direct inbound connectivity (set DC_FILE_TRANSFER=1 to force)",
+    ),
     pytest.mark.integration,
     pytest.mark.asyncio,
 ]
