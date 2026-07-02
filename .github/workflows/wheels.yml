@@ -23,6 +23,12 @@ concurrency:
 permissions:
   actions: write
 
+env:
+  # Core release tag whose prebuilt SDK archives are consumed (best-effort).
+  # If the matching SDK asset is missing, the build falls back to compiling
+  # the core from source via FetchContent (see CMakeLists.txt).
+  EISKALTDCPP_CORE_TAG: v2.5.0
+
 jobs:
   # ─── Build wheels ───────────────────────────────────────────────
   build-wheels:
@@ -92,9 +98,18 @@ jobs:
             dnf install -y
             openssl-devel zlib-devel bzip2-devel
             pcre-devel pcre2-devel lua-devel
-            libidn-devel miniupnpc-devel
+            libidn-devel libidn2-devel miniupnpc-devel
             gettext-devel
-            swig cmake gcc-c++ ninja-build
+            swig cmake gcc-c++ ninja-build tar gzip
+            &&
+            ( SDKD="$HOME/.eiskaltdcpp-sdk"; mkdir -p "$SDKD";
+            URL="https://github.com/transfix/eiskaltdcpp/releases/download/${EISKALTDCPP_CORE_TAG}/eiskaltdcpp-core-${EISKALTDCPP_CORE_TAG}-linux-x64.tar.gz";
+            if curl -fSL "$URL" -o /tmp/edcpp-sdk.tgz;
+            then tar xzf /tmp/edcpp-sdk.tgz -C "$SDKD"
+            && ln -sfn "$SDKD/eiskaltdcpp-core-${EISKALTDCPP_CORE_TAG}-linux-x64" "$SDKD/core"
+            && echo "Using prebuilt core SDK at $SDKD/core";
+            else echo "No prebuilt SDK for ${EISKALTDCPP_CORE_TAG}; core will be built from source."; fi )
+          CIBW_ENVIRONMENT_PASS_LINUX: EISKALTDCPP_CORE_TAG
           CIBW_REPAIR_WHEEL_COMMAND_LINUX: >
             auditwheel repair -w {dest_dir} {wheel}
 
@@ -116,6 +131,14 @@ jobs:
           # ── macOS ───────────────────────────────────────────────
           CIBW_BEFORE_ALL_MACOS: >
             brew install swig openssl@3 miniupnpc libidn2 pcre2 lua bzip2 gettext gcc
+            &&
+            ( SDKD="$HOME/.eiskaltdcpp-sdk"; mkdir -p "$SDKD"; ARCH=$(uname -m);
+            URL="https://github.com/transfix/eiskaltdcpp/releases/download/${EISKALTDCPP_CORE_TAG}/eiskaltdcpp-core-${EISKALTDCPP_CORE_TAG}-macos-${ARCH}.tar.gz";
+            if curl -fSL "$URL" -o /tmp/edcpp-sdk.tgz;
+            then tar xzf /tmp/edcpp-sdk.tgz -C "$SDKD"
+            && ln -sfn "$SDKD/eiskaltdcpp-core-${EISKALTDCPP_CORE_TAG}-macos-${ARCH}" "$SDKD/core"
+            && echo "Using prebuilt core SDK at $SDKD/core";
+            else echo "No prebuilt SDK for ${EISKALTDCPP_CORE_TAG}; core will be built from source."; fi )
           CIBW_REPAIR_WHEEL_COMMAND_MACOS: >
             delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}
           CIBW_ENVIRONMENT_MACOS: >
@@ -124,12 +147,14 @@ jobs:
             CMAKE_ARGS="-DUSE_SYSTEM_EISKALTDCPP=OFF
             -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)
             -DCMAKE_PREFIX_PATH=$(brew --prefix openssl@3);$(brew --prefix bzip2);$(brew --prefix pcre2);$(brew --prefix miniupnpc);$(brew --prefix libidn2);$(brew --prefix lua);$(brew --prefix gettext)
-            -DCMAKE_C_COMPILER=$(brew --prefix gcc)/bin/gcc-14
-            -DCMAKE_CXX_COMPILER=$(brew --prefix gcc)/bin/g++-14"
+            -DCMAKE_C_COMPILER=$(ls $(brew --prefix gcc)/bin/gcc-[0-9]* | sort -V | tail -1)
+            -DCMAKE_CXX_COMPILER=$(ls $(brew --prefix gcc)/bin/g++-[0-9]* | sort -V | tail -1)
+            -DEISKALTDCPP_SDK_DIR=$HOME/.eiskaltdcpp-sdk/core"
 
-          # ── Common ──────────────────────────────────────────────
+          # ── Common (applies to Linux) ───────────────────────────
           CIBW_ENVIRONMENT: >
-            CMAKE_ARGS="-DUSE_SYSTEM_EISKALTDCPP=OFF"
+            CMAKE_ARGS="-DUSE_SYSTEM_EISKALTDCPP=OFF
+            -DEISKALTDCPP_SDK_DIR=$HOME/.eiskaltdcpp-sdk/core"
           CIBW_TEST_REQUIRES: pytest
           CIBW_TEST_COMMAND: >
             python -m pytest {project}/tests/ -v --tb=short

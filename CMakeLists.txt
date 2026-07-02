@@ -26,6 +26,8 @@ include(FetchContent)
 
 option(BUILD_TESTS "Build tests" ON)
 option(USE_SYSTEM_EISKALTDCPP "Prefer system libeiskaltdcpp if available" ON)
+set(EISKALTDCPP_SDK_DIR "" CACHE PATH
+    "Path to a prebuilt eiskaltdcpp core SDK (contains include/ and lib/). Takes priority over any system library.")
 
 # ===========================================================================
 # Find Python
@@ -55,8 +57,32 @@ message(STATUS "SWIG ${SWIG_VERSION} found: ${SWIG_EXECUTABLE}")
 
 set(EISKALTDCPP_FOUND FALSE)
 
-if(USE_SYSTEM_EISKALTDCPP)
-    # Try system-installed libeiskaltdcpp-dev
+# 1) Prefer an explicit prebuilt SDK (see eiskaltdcpp's EISKALTDCPP_SDK build).
+#    Searched with NO_DEFAULT_PATH and before the system package so a stale
+#    system copy cannot shadow the pinned version.
+if(EISKALTDCPP_SDK_DIR)
+    find_path(EISKALTDCPP_INCLUDE_DIR
+        NAMES dcpp/DCPlusPlus.h
+        PATHS "${EISKALTDCPP_SDK_DIR}/include/eiskaltdcpp"
+        NO_DEFAULT_PATH
+    )
+    find_library(EISKALTDCPP_LIBRARY
+        NAMES eiskaltdcpp
+        PATHS "${EISKALTDCPP_SDK_DIR}/lib" "${EISKALTDCPP_SDK_DIR}/bin"
+        NO_DEFAULT_PATH
+    )
+    if(EISKALTDCPP_INCLUDE_DIR AND EISKALTDCPP_LIBRARY)
+        message(STATUS "Using prebuilt eiskaltdcpp SDK: ${EISKALTDCPP_SDK_DIR}")
+    else()
+        message(WARNING "EISKALTDCPP_SDK_DIR='${EISKALTDCPP_SDK_DIR}' set but no SDK "
+                        "found there (expected include/eiskaltdcpp/dcpp/DCPlusPlus.h "
+                        "and lib/eiskaltdcpp). Falling back to system/FetchContent.")
+    endif()
+endif()
+
+# 2) Otherwise try a system-installed libeiskaltdcpp-dev.  The find_* calls are
+#    cache-guarded, so they are no-ops if the SDK above already resolved them.
+if(USE_SYSTEM_EISKALTDCPP AND NOT (EISKALTDCPP_INCLUDE_DIR AND EISKALTDCPP_LIBRARY))
     find_path(EISKALTDCPP_INCLUDE_DIR
         NAMES dcpp/DCPlusPlus.h
         PATHS
@@ -71,36 +97,52 @@ if(USE_SYSTEM_EISKALTDCPP)
             /usr/lib/x86_64-linux-gnu
             /usr/local/lib
     )
+endif()
 
-    if(EISKALTDCPP_INCLUDE_DIR AND EISKALTDCPP_LIBRARY)
-        message(STATUS "Found system libeiskaltdcpp:")
-        message(STATUS "  Include: ${EISKALTDCPP_INCLUDE_DIR}")
-        message(STATUS "  Library: ${EISKALTDCPP_LIBRARY}")
+# 3) If either a prebuilt SDK or a system package supplied the headers and
+#    library, wire up the imported target and detect the Lua ABI flag.
+if(EISKALTDCPP_INCLUDE_DIR AND EISKALTDCPP_LIBRARY)
+    message(STATUS "Found libeiskaltdcpp:")
+    message(STATUS "  Include: ${EISKALTDCPP_INCLUDE_DIR}")
+    message(STATUS "  Library: ${EISKALTDCPP_LIBRARY}")
 
-        add_library(eiskaltdcpp::dcpp SHARED IMPORTED)
+    add_library(eiskaltdcpp::dcpp SHARED IMPORTED)
+    if(WIN32)
+        # On Windows the "library" is the import lib; the DLL is the runtime.
+        find_file(EISKALTDCPP_DLL
+            NAMES eiskaltdcpp.dll
+            PATHS "${EISKALTDCPP_SDK_DIR}/bin" "${EISKALTDCPP_SDK_DIR}/lib"
+            NO_DEFAULT_PATH
+        )
+        set_target_properties(eiskaltdcpp::dcpp PROPERTIES
+            IMPORTED_IMPLIB "${EISKALTDCPP_LIBRARY}"
+            IMPORTED_LOCATION "${EISKALTDCPP_DLL}"
+            INTERFACE_INCLUDE_DIRECTORIES "${EISKALTDCPP_INCLUDE_DIR}"
+        )
+    else()
         set_target_properties(eiskaltdcpp::dcpp PROPERTIES
             IMPORTED_LOCATION "${EISKALTDCPP_LIBRARY}"
             INTERFACE_INCLUDE_DIRECTORIES "${EISKALTDCPP_INCLUDE_DIR}"
         )
-        set(EISKALTDCPP_FOUND TRUE)
+    endif()
+    set(EISKALTDCPP_FOUND TRUE)
 
-        # Detect whether the system library was compiled with Lua scripting.
-        # When LUA_SCRIPT is enabled, Client inherits from ClientScriptInstance
-        # which changes the ABI layout (extra vtable pointer).  Our bridge code
-        # MUST be compiled with the same setting to match member offsets.
-        if(EXISTS "${EISKALTDCPP_INCLUDE_DIR}/dcpp/ScriptManager.h")
-            find_package(Lua 5.2)
-            if(LUA_FOUND)
-                message(STATUS "System libeiskaltdcpp has Lua scripting — enabling LUA_SCRIPT for ABI compat")
-                set(EISKALTDCPP_HAS_LUA TRUE)
-            else()
-                message(WARNING "System libeiskaltdcpp has Lua support but Lua dev headers not found. "
-                                "ABI mismatch may cause crashes!")
-                set(EISKALTDCPP_HAS_LUA FALSE)
-            endif()
+    # Detect whether the library was compiled with Lua scripting.
+    # When LUA_SCRIPT is enabled, Client inherits from ClientScriptInstance
+    # which changes the ABI layout (extra vtable pointer).  Our bridge code
+    # MUST be compiled with the same setting to match member offsets.
+    if(EXISTS "${EISKALTDCPP_INCLUDE_DIR}/dcpp/ScriptManager.h")
+        find_package(Lua 5.2)
+        if(LUA_FOUND)
+            message(STATUS "libeiskaltdcpp has Lua scripting — enabling LUA_SCRIPT for ABI compat")
+            set(EISKALTDCPP_HAS_LUA TRUE)
         else()
+            message(WARNING "libeiskaltdcpp has Lua support but Lua dev headers not found. "
+                            "ABI mismatch may cause crashes!")
             set(EISKALTDCPP_HAS_LUA FALSE)
         endif()
+    else()
+        set(EISKALTDCPP_HAS_LUA FALSE)
     endif()
 endif()
 
