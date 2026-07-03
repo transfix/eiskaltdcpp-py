@@ -71,6 +71,15 @@ else()
 endif()
 set_target_properties(dc_core PROPERTIES SUFFIX "${_DC_CORE_SUFFIX}")
 
+# When consuming a prebuilt shared core (SDK or system), the extension records
+# the core lib as a RUNPATH (Linux) / @rpath (macOS) dependency. Add the lib
+# directory as an RPATH so auditwheel/delocate can locate and vendor it into
+# the wheel during repair. Harmless on Windows (no rpath concept).
+if(EISKALTDCPP_LIB_DIR AND NOT WIN32)
+    set_property(TARGET dc_core APPEND PROPERTY BUILD_RPATH "${EISKALTDCPP_LIB_DIR}")
+    set_property(TARGET dc_core APPEND PROPERTY INSTALL_RPATH "${EISKALTDCPP_LIB_DIR}")
+endif()
+
 # ---------------------------------------------------------------------------
 # Windows: Copy vcpkg runtime DLLs alongside the .pyd
 #

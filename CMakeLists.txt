@@ -131,6 +131,13 @@ if(EISKALTDCPP_INCLUDE_DIR AND EISKALTDCPP_LIBRARY)
     endif()
     set(EISKALTDCPP_FOUND TRUE)
 
+    # Directory holding the shared library. The SWIG extension records the
+    # core lib as a RUNPATH/@rpath dependency, so we add this dir as an RPATH
+    # on the extension (see swig/CMakeLists.txt). Without it auditwheel and
+    # delocate cannot locate libeiskaltdcpp.so.2.5 / libeiskaltdcpp.2.5.dylib
+    # to vendor into the wheel during the repair step.
+    get_filename_component(EISKALTDCPP_LIB_DIR "${EISKALTDCPP_LIBRARY}" DIRECTORY)
+
     # Detect whether the library was compiled with Lua scripting.
     # When LUA_SCRIPT is enabled, Client inherits from ClientScriptInstance
     # which changes the ABI layout (extra vtable pointer).  Our bridge code

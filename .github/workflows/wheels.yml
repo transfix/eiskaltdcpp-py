@@ -161,6 +161,7 @@ jobs:
 
           # ── Common (applies to Linux) ───────────────────────────
           CIBW_ENVIRONMENT: >
+            LD_LIBRARY_PATH="$HOME/.eiskaltdcpp-sdk/core/lib"
             CMAKE_ARGS="-DUSE_SYSTEM_EISKALTDCPP=OFF
             -DEISKALTDCPP_SDK_DIR=$HOME/.eiskaltdcpp-sdk/core"
           CIBW_TEST_REQUIRES: pytest bcrypt
