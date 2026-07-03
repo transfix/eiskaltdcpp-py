@@ -3,7 +3,7 @@
 #
 # Follows the pattern from verlihub/src/swig/CMakeLists.txt:
 #   - Uses swig_add_library() with the .i file
-#   - Links against our static bridge library + Python3::Python
+#   - Links against our static bridge library + Python3::Module
 #   - Outputs _dc_core.so and dc_core.py to python/eiskaltdcpp/
 #
 
@@ -37,10 +37,14 @@ target_include_directories(dc_core
 )
 
 # Link against bridge static library and Python
+# Use Python3::Module (not Python3::Python/Embed): extension modules must not
+# link libpython on Unix (symbols resolve at load time), while Windows still
+# links pythonXX.lib. Python3::Module handles this correctly per-platform and
+# works in manylinux where a linkable libpython is unavailable.
 target_link_libraries(dc_core
     PRIVATE
         eiskaltdcpp_py_bridge
-        Python3::Python
+        Python3::Module
 )
 
 # Set output name: _dc_core.so (SWIG convention: underscore prefix)
@@ -48,13 +52,65 @@ set_target_properties(dc_core PROPERTIES
     PREFIX ""
     OUTPUT_NAME "_dc_core"
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/eiskaltdcpp"
+    # On Windows, .pyd (DLL) goes to RUNTIME_OUTPUT_DIRECTORY
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/eiskaltdcpp"
+    # Suppress per-config subdirs (Release/, Debug/) for multi-config generators
+    LIBRARY_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/python/eiskaltdcpp"
+    LIBRARY_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/python/eiskaltdcpp"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/python/eiskaltdcpp"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/python/eiskaltdcpp"
 )
 
 # Platform-specific suffix
 if(WIN32)
-    set_target_properties(dc_core PROPERTIES SUFFIX ".pyd")
+    set(_DC_CORE_SUFFIX ".pyd")
+elseif(APPLE)
+    set(_DC_CORE_SUFFIX ".so")  # Python extensions use .so even on macOS
 else()
-    set_target_properties(dc_core PROPERTIES SUFFIX ".so")
+    set(_DC_CORE_SUFFIX ".so")
+endif()
+set_target_properties(dc_core PROPERTIES SUFFIX "${_DC_CORE_SUFFIX}")
+
+# When consuming a prebuilt shared core (SDK or system), the extension records
+# the core lib as a RUNPATH (Linux) / @rpath (macOS) dependency. Add the lib
+# directory as an RPATH so auditwheel/delocate can locate and vendor it into
+# the wheel during repair. Harmless on Windows (no rpath concept).
+if(EISKALTDCPP_LIB_DIR AND NOT WIN32)
+    set_property(TARGET dc_core APPEND PROPERTY BUILD_RPATH "${EISKALTDCPP_LIB_DIR}")
+    set_property(TARGET dc_core APPEND PROPERTY INSTALL_RPATH "${EISKALTDCPP_LIB_DIR}")
+endif()
+
+# ---------------------------------------------------------------------------
+# Windows: Copy vcpkg runtime DLLs alongside the .pyd
+#
+# _dc_core.pyd statically links libeiskaltdcpp but dynamically links the
+# vcpkg-provided runtime DLLs (OpenSSL, gettext/libintl, zlib, bzip2, etc.).
+# Windows resolves DLLs from the executable (python.exe) directory first,
+# then PATH.  If MSYS2 (MinGW ABI) is on PATH its libintl-8.dll will
+# shadow the vcpkg (MSVC ABI) version, causing a hard crash.
+#
+# Copying the correct DLLs next to the .pyd ensures the loader finds
+# the vcpkg-built versions regardless of PATH ordering.
+# ---------------------------------------------------------------------------
+if(WIN32 AND DEFINED VCPKG_INSTALLED_DIR)
+    set(_VCPKG_BIN_DIR "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin")
+    add_custom_command(TARGET dc_core POST_BUILD
+        COMMAND ${CMAKE_COMMAND}
+            -DSOURCE_DIR=${_VCPKG_BIN_DIR}
+            -DDEST_DIR=$<TARGET_FILE_DIR:dc_core>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/copy_runtime_dlls.cmake
+        COMMENT "Copying vcpkg runtime DLLs alongside _dc_core.pyd"
+    )
+elseif(WIN32 AND DEFINED ENV{VCPKG_INSTALLATION_ROOT})
+    # Classic-mode vcpkg (vcpkg install, not manifest)
+    set(_VCPKG_BIN_DIR "$ENV{VCPKG_INSTALLATION_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/bin")
+    add_custom_command(TARGET dc_core POST_BUILD
+        COMMAND ${CMAKE_COMMAND}
+            -DSOURCE_DIR=${_VCPKG_BIN_DIR}
+            -DDEST_DIR=$<TARGET_FILE_DIR:dc_core>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/copy_runtime_dlls.cmake
+        COMMENT "Copying vcpkg runtime DLLs alongside _dc_core.pyd"
+    )
 endif()
 
 # Ensure the output directory and Python source files exist in build tree
@@ -76,6 +132,18 @@ add_custom_command(TARGET dc_core POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/exceptions.py
         ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/exceptions.py
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/protocol.py
+        ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/protocol.py
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/hub_aliases.py
+        ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/hub_aliases.py
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/search_store.py
+        ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/search_store.py
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/event_meta.py
+        ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/event_meta.py
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/api
         ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/api
@@ -86,19 +154,35 @@ add_custom_command(TARGET dc_core POST_BUILD
 # Dev symlinks — so that "poetry install" (editable) and PYTHONPATH=python/
 # can find the SWIG artifacts without having to set PYTHONPATH=build/python/.
 # These are gitignored (*.so globally, dc_core.py explicitly).
+# On Windows, use copy instead of symlinks (symlinks need admin privileges).
 # ---------------------------------------------------------------------------
-add_custom_command(TARGET dc_core POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E create_symlink
-        ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/_dc_core.so
-        ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/_dc_core.so
-    COMMAND ${CMAKE_COMMAND} -E create_symlink
-        ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/dc_core.py
-        ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/dc_core.py
-    COMMAND ${CMAKE_COMMAND} -E create_symlink
-        ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/_version.py
-        ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/_version.py
-    COMMENT "Dev symlinks created in python/eiskaltdcpp/ for editable installs"
-)
+if(WIN32)
+    add_custom_command(TARGET dc_core POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/_dc_core${_DC_CORE_SUFFIX}
+            ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/_dc_core${_DC_CORE_SUFFIX}
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/dc_core.py
+            ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/dc_core.py
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/_version.py
+            ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/_version.py
+        COMMENT "Dev copies created in python/eiskaltdcpp/ for editable installs"
+    )
+else()
+    add_custom_command(TARGET dc_core POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E create_symlink
+            ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/_dc_core${_DC_CORE_SUFFIX}
+            ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/_dc_core${_DC_CORE_SUFFIX}
+        COMMAND ${CMAKE_COMMAND} -E create_symlink
+            ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/dc_core.py
+            ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/dc_core.py
+        COMMAND ${CMAKE_COMMAND} -E create_symlink
+            ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/_version.py
+            ${CMAKE_SOURCE_DIR}/python/eiskaltdcpp/_version.py
+        COMMENT "Dev symlinks created in python/eiskaltdcpp/ for editable installs"
+    )
+endif()
 
 # Ensure _version.py is also in the build tree for tests
 add_custom_command(TARGET dc_core POST_BUILD
@@ -127,10 +211,22 @@ else()
 endif()
 
 # Install the SWIG module
-install(TARGETS dc_core
-    LIBRARY DESTINATION ${_PY_INSTALL_DIR}
-    COMPONENT PythonModule
-)
+# A Python extension is a MODULE/LIBRARY artifact on Unix but a DLL (RUNTIME)
+# on Windows, so the artifact-kind destination differs per platform. Install
+# per-platform: LIBRARY on Unix (unchanged, known-good), RUNTIME on Windows so
+# _dc_core.pyd actually lands in the wheel. NOTE: adding RUNTIME unconditionally
+# was observed to drop the Unix .so from the wheel, so keep them separate.
+if(WIN32)
+    install(TARGETS dc_core
+        RUNTIME DESTINATION ${_PY_INSTALL_DIR}
+        COMPONENT PythonModule
+    )
+else()
+    install(TARGETS dc_core
+        LIBRARY DESTINATION ${_PY_INSTALL_DIR}
+        COMPONENT PythonModule
+    )
+endif()
 
 install(FILES
     ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/dc_core.py

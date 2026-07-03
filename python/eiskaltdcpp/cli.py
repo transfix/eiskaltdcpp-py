@@ -59,6 +59,20 @@ from typing import Optional
 import click
 
 from eiskaltdcpp.exceptions import LuaError
+from eiskaltdcpp.hub_aliases import (
+    add_alias,
+    list_aliases,
+    load_aliases,
+    remove_alias,
+    resolve as resolve_alias,
+)
+from eiskaltdcpp.search_store import (
+    list_saved_searches,
+    load_search,
+    purge_all_searches,
+    purge_search,
+    save_search,
+)
 
 logger = logging.getLogger("eiskaltdcpp.cli")
 
@@ -66,6 +80,33 @@ logger = logging.getLogger("eiskaltdcpp.cli")
 DEFAULT_PID_FILE = "/tmp/eiskaltdcpp.pid"
 DEFAULT_LOG_FILE = ""  # empty = stdout/stderr
 DEFAULT_API_URL = "http://localhost:8080"
+
+
+# ============================================================================
+# Hub alias resolution helpers
+# ============================================================================
+
+def _resolve_hub_cb(_ctx, _param, value):
+    """Click callback — resolve a single hub alias or URL."""
+    if not value:
+        return value
+    try:
+        return resolve_alias(value)
+    except KeyError as exc:
+        raise click.BadParameter(str(exc))
+
+
+def _resolve_hubs_cb(_ctx, _param, value):
+    """Click callback — resolve a tuple of hub aliases/URLs (``multiple=True``)."""
+    if not value:
+        return value
+    resolved = []
+    for v in value:
+        try:
+            resolved.append(resolve_alias(v))
+        except KeyError as exc:
+            raise click.BadParameter(str(exc))
+    return tuple(resolved)
 
 
 # ============================================================================
@@ -98,6 +139,31 @@ def _write_pid(pid_file: str, pid: int) -> None:
     atexit.register(lambda: path.unlink(missing_ok=True))
 
 
+def _is_process_alive(pid: int) -> bool:
+    """Return *True* if *pid* refers to a running process (Windows-safe).
+
+    On Windows ``os.kill(pid, 0)`` sends ``CTRL_C_EVENT`` which can kill
+    the *calling* process.  Use ``OpenProcess`` instead.
+    """
+    try:
+        if sys.platform == "win32":
+            import ctypes
+            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = kernel32.OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION, False, pid,
+            )
+            if not handle:
+                return False
+            kernel32.CloseHandle(handle)
+            return True
+        else:
+            os.kill(pid, 0)
+            return True
+    except OSError:
+        return False
+
+
 def _read_pid(pid_file: str) -> Optional[int]:
     """Read a PID from a file. Returns None if missing or stale."""
     path = Path(pid_file)
@@ -105,11 +171,13 @@ def _read_pid(pid_file: str) -> Optional[int]:
         return None
     try:
         pid = int(path.read_text().strip())
-        os.kill(pid, 0)  # check if alive
-        return pid
     except (ValueError, OSError):
         path.unlink(missing_ok=True)
         return None
+    if _is_process_alive(pid):
+        return pid
+    path.unlink(missing_ok=True)
+    return None
 
 
 def _daemonise(log_file: str, pid_file: str) -> None:
@@ -384,8 +452,9 @@ def _daemon_options(fn):
         help="DC client config directory. Env: EISKALTDCPP_CONFIG_DIR",
     )(fn)
     fn = click.option(
-        "--hub", "hubs", multiple=True,
-        help="Hub URL to connect to (can be repeated).",
+        "--hub", "hubs", multiple=True, callback=_resolve_hubs_cb,
+        is_eager=True, expose_value=True,
+        help="Hub URL or alias to connect to (can be repeated).",
     )(fn)
     fn = click.option(
         "--nick", default="", envvar="EISKALTDCPP_NICK",
@@ -632,14 +701,12 @@ def stop(pid_file):
         # Wait a moment for clean shutdown
         for _ in range(30):
             time.sleep(0.1)
-            try:
-                os.kill(pid, 0)
-            except OSError:
+            if not _is_process_alive(pid):
                 click.echo("Process stopped.")
                 Path(pid_file).unlink(missing_ok=True)
                 return
         click.echo("Process did not stop within 3s — sending SIGKILL")
-        os.kill(pid, signal.SIGKILL)
+        os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
         Path(pid_file).unlink(missing_ok=True)
     except ProcessLookupError:
         click.echo("Process already gone.")
@@ -869,8 +936,19 @@ def _get_client(ctx: click.Context):
 
 
 def _run(coro):
-    """Run an async coroutine in a new event loop."""
-    return asyncio.run(coro)
+    """Run an async coroutine in a new event loop.
+
+    On Windows, use WindowsSelectorEventLoopPolicy to avoid
+    ProactorEventLoop cleanup issues (ResourceWarning / RuntimeError
+    with pipe transports).
+    """
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    try:
+        return asyncio.run(coro)
+    finally:
+        if sys.platform == "win32":
+            asyncio.set_event_loop_policy(None)
 
 
 def _print_json(data):
@@ -922,21 +1000,27 @@ def _format_size(n: int) -> str:
 def hub():
     """Manage hub connections.
 
+    Hub URLs can be provided as full URLs or as short aliases.
+    Use ``eispy hub alias add <name> <url>`` to create aliases.
+
     \b
     Examples:
       eispy hub connect dchub://hub.example.com:411
-      eispy hub disconnect dchub://hub.example.com:411
+      eispy hub connect winter              # using an alias
+      eispy hub disconnect winter
       eispy hub ls
-      eispy hub users dchub://hub.example.com:411
+      eispy hub users winter
+      eispy hub alias ls
+      eispy hub alias add winter nmdcs://wintermute.sublevels.net:411
     """
 
 
 @hub.command("connect")
-@click.argument("url")
+@click.argument("url", callback=_resolve_hub_cb)
 @click.option("--encoding", default="", help="Text encoding (e.g. CP1252).")
 @click.pass_context
 def hub_connect(ctx, url, encoding):
-    """Connect to a DC hub."""
+    """Connect to a DC hub (accepts alias or URL)."""
     async def _do():
         async with _get_client(ctx) as client:
             await client.connect(url, encoding)
@@ -945,10 +1029,10 @@ def hub_connect(ctx, url, encoding):
 
 
 @hub.command("disconnect")
-@click.argument("url")
+@click.argument("url", callback=_resolve_hub_cb)
 @click.pass_context
 def hub_disconnect(ctx, url):
-    """Disconnect from a DC hub."""
+    """Disconnect from a DC hub (accepts alias or URL)."""
     async def _do():
         async with _get_client(ctx) as client:
             await client.disconnect(url)
@@ -972,10 +1056,10 @@ def hub_list(ctx):
 
 
 @hub.command("users")
-@click.argument("hub_url")
+@click.argument("hub_url", callback=_resolve_hub_cb)
 @click.pass_context
 def hub_users(ctx, hub_url):
-    """List users on a hub."""
+    """List users on a hub (accepts alias or URL)."""
     async def _do():
         async with _get_client(ctx) as client:
             users = await client.get_users_async(hub_url)
@@ -990,6 +1074,82 @@ def hub_users(ctx, hub_url):
                 cols = [c for c in cols if c in available] or available[:5]
             _print_table(rows, cols)
     _run(_do())
+
+
+# --- Hub alias management ---
+
+@hub.group("alias")
+def hub_alias():
+    """Manage hub aliases (short names for hub URLs).
+
+    Aliases let you use a short name instead of a full hub URL in any
+    command that accepts a hub URL.  Aliases are stored in
+    ``~/.config/eispy/hubs.json`` (override with ``EISPY_HUBS_FILE``).
+
+    All four DC URL schemes are supported:
+    ``dchub://``, ``nmdcs://`` (NMDC + TLS), ``adc://``, ``adcs://`` (ADC + TLS).
+
+    \b
+    Examples:
+      eispy hub alias add winter nmdcs://wintermute.sublevels.net:411
+      eispy hub alias add myhub dchub://myhub.example.com:411
+      eispy hub alias ls
+      eispy hub alias rm winter
+
+    Then use the alias anywhere a hub URL is expected:
+      eispy hub connect winter
+      eispy chat send winter "Hello!"
+      eispy hub users winter
+      eispy search query "file" --hub winter
+      eispy up --hub winter --hub myhub
+    """
+
+
+@hub_alias.command("add")
+@click.argument("name")
+@click.argument("url")
+def hub_alias_add(name, url):
+    """Add or update a hub alias.
+
+    \b
+    Examples:
+      eispy hub alias add winter nmdcs://wintermute.sublevels.net:411
+      eispy hub alias add myhub dchub://myhub.example.com:411
+      eispy hub alias add securehub adcs://adc.example.com:5001
+    """
+    if "://" not in url:
+        raise click.BadParameter(
+            f"URL must include a scheme (dchub://, nmdcs://, adc://, adcs://), "
+            f"got: {url!r}",
+            param_hint="'URL'",
+        )
+    add_alias(name, url)
+    click.echo(f"Alias added: {name} -> {url}")
+
+
+@hub_alias.command("rm")
+@click.argument("name")
+def hub_alias_rm(name):
+    """Remove a hub alias."""
+    if remove_alias(name):
+        click.echo(f"Alias removed: {name}")
+    else:
+        click.echo(f"Alias not found: {name}", err=True)
+        raise SystemExit(1)
+
+
+@hub_alias.command("ls")
+def hub_alias_ls():
+    """List all hub aliases."""
+    aliases = list_aliases()
+    if not aliases:
+        click.echo("No hub aliases configured")
+        click.echo("Add one with: eispy hub alias add <name> <url>")
+        return
+    # Find max name width for alignment
+    max_name = max(len(n) for n in aliases)
+    for name, url in sorted(aliases.items()):
+        click.echo(f"  {name:<{max_name}}  {url}")
 
 
 # ============================================================================
@@ -1009,7 +1169,7 @@ def chat():
 
 
 @chat.command("send")
-@click.argument("hub_url")
+@click.argument("hub_url", callback=_resolve_hub_cb)
 @click.argument("message")
 @click.pass_context
 def chat_send(ctx, hub_url, message):
@@ -1022,7 +1182,7 @@ def chat_send(ctx, hub_url, message):
 
 
 @chat.command("pm")
-@click.argument("hub_url")
+@click.argument("hub_url", callback=_resolve_hub_cb)
 @click.argument("nick")
 @click.argument("message")
 @click.pass_context
@@ -1036,7 +1196,7 @@ def chat_pm(ctx, hub_url, nick, message):
 
 
 @chat.command("history")
-@click.argument("hub_url")
+@click.argument("hub_url", callback=_resolve_hub_cb)
 @click.option("-n", "--lines", default=50, help="Max lines to retrieve.")
 @click.pass_context
 def chat_history(ctx, hub_url, lines):
@@ -1058,12 +1218,21 @@ def search():
     """Search the DC network for files.
 
     \b
-    Examples:
+    Live results (accumulated from all searches):
       eispy search query "ubuntu iso"
-      eispy search query "movie.mkv" --type 1 --hub dchub://hub:411
       eispy search results
       eispy search results --json
       eispy search clear
+
+    \b
+    Saved searches (per-query result snapshots):
+      eispy search query "ubuntu iso" --save ubuntu
+      eispy search query "fedora" --save fedora --wait 15
+      eispy search saved
+      eispy search show ubuntu
+      eispy search show ubuntu --json
+      eispy search purge ubuntu
+      eispy search purge --all
     """
 
 
@@ -1075,27 +1244,91 @@ def search():
 @click.option("--size-mode", default=0, type=int,
               help="Size filter mode (0=at least, 1=at most, 2=exact).")
 @click.option("--size", default=0, type=int, help="Size filter value in bytes.")
-@click.option("--hub", "hub_url", default="", help="Limit to a specific hub.")
+@click.option("--hub", "hub_url", default="", callback=_resolve_hub_cb,
+              help="Limit to a specific hub (alias or URL).")
+@click.option("--save", "save_name", default="",
+              help="Save results under this name for later review.")
+@click.option("--wait", "wait_secs", default=10, type=int,
+              help="Seconds to wait for results when using --save (default: 10).")
+@click.option("--min-results", default=1, type=int,
+              help="Minimum results to collect before returning (with --save).")
 @click.pass_context
-def search_query(ctx, terms, file_type, size_mode, size, hub_url):
-    """Search for files on connected hubs."""
+def search_query(ctx, terms, file_type, size_mode, size, hub_url,
+                 save_name, wait_secs, min_results):
+    """Search for files on connected hubs.
+
+    Without --save, fires a search and returns immediately.  Use
+    ``eispy search results`` to view accumulated results later.
+
+    With --save NAME, waits for results and saves them as a named
+    snapshot.  Use ``eispy search show NAME`` to view them.
+
+    \b
+    Examples:
+      eispy search query "ubuntu iso"
+      eispy search query "ubuntu iso" --save ubuntu
+      eispy search query "ubuntu iso" --save ubuntu --wait 20 --min-results 5
+      eispy search query "movie.mkv" --type 6 --hub winter --save movies
+    """
+    if save_name:
+        _search_and_save(ctx, terms, file_type, size_mode, size, hub_url,
+                         save_name, wait_secs, min_results)
+    else:
+        async def _do():
+            async with _get_client(ctx) as client:
+                ok = await client.search_async(
+                    terms, file_type=file_type, size_mode=size_mode,
+                    size=size, hub_url=hub_url,
+                )
+                if ok:
+                    click.echo(f"Search sent: {terms}")
+                    click.echo("Use 'eispy search results' to view results "
+                               "(allow a few seconds).")
+                    click.echo("Tip: use --save NAME to capture results for "
+                               "later review.")
+                else:
+                    click.echo("Search failed", err=True)
+                    raise SystemExit(1)
+        _run(_do())
+
+
+def _search_and_save(ctx, terms, file_type, size_mode, size, hub_url,
+                     save_name, wait_secs, min_results):
+    """Execute a search, wait for results, and save them."""
     async def _do():
         async with _get_client(ctx) as client:
+            # Clear existing results so we capture only this query's results
+            await client.clear_search_results_async(hub_url)
+
             ok = await client.search_async(
                 terms, file_type=file_type, size_mode=size_mode,
                 size=size, hub_url=hub_url,
             )
-            if ok:
-                click.echo(f"Search sent: {terms}")
-                click.echo("Use 'eispy search results' to view results (allow a few seconds).")
-            else:
+            if not ok:
                 click.echo("Search failed", err=True)
                 raise SystemExit(1)
+
+            click.echo(f"Search sent: {terms}")
+            click.echo(f"Waiting up to {wait_secs}s for results...")
+
+            # Wait, then collect whatever accumulated
+            await asyncio.sleep(wait_secs)
+            raw_results = await client.get_search_results_async(hub_url)
+
+            results = [_obj_to_dict(r) for r in raw_results]
+            path = save_search(
+                save_name, terms, results,
+                file_type=file_type, size_mode=size_mode,
+                size=size, hub_url=hub_url,
+            )
+            click.echo(f"Saved {len(results)} result(s) as '{save_name}'")
+            click.echo(f"View with: eispy search show {save_name}")
     _run(_do())
 
 
 @search.command("results")
-@click.option("--hub", "hub_url", default="", help="Filter by hub URL.")
+@click.option("--hub", "hub_url", default="", callback=_resolve_hub_cb,
+              help="Filter by hub (alias or URL).")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 @click.pass_context
 def search_results(ctx, hub_url, as_json):
@@ -1117,7 +1350,8 @@ def search_results(ctx, hub_url, as_json):
 
 
 @search.command("clear")
-@click.option("--hub", "hub_url", default="", help="Clear for specific hub only.")
+@click.option("--hub", "hub_url", default="", callback=_resolve_hub_cb,
+              help="Clear for specific hub only (alias or URL).")
 @click.pass_context
 def search_clear(ctx, hub_url):
     """Clear search results."""
@@ -1126,6 +1360,80 @@ def search_clear(ctx, hub_url):
             await client.clear_search_results_async(hub_url)
             click.echo("Search results cleared")
     _run(_do())
+
+
+@search.command("saved")
+def search_saved():
+    """List saved search result sets.
+
+    Shows all named searches that were captured with ``--save``.
+    """
+    entries = list_saved_searches()
+    if not entries:
+        click.echo("No saved searches")
+        click.echo("Tip: use 'eispy search query \"terms\" --save NAME' "
+                    "to capture results.")
+        return
+    _print_table(entries, ["name", "query", "count", "timestamp", "hub_url"])
+
+
+@search.command("show")
+@click.argument("name")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+def search_show(name, as_json):
+    """Show results from a saved search.
+
+    \b
+    Examples:
+      eispy search show ubuntu
+      eispy search show ubuntu --json
+    """
+    data = load_search(name)
+    if data is None:
+        click.echo(f"Saved search not found: {name}", err=True)
+        click.echo("Use 'eispy search saved' to list available searches.")
+        raise SystemExit(1)
+
+    click.echo(f"Search: {data.get('query', '?')}  "
+               f"({data.get('count', 0)} results, "
+               f"{data.get('timestamp_iso', '?')})")
+
+    results = data.get("results", [])
+    if as_json:
+        _print_json(results)
+    elif not results:
+        click.echo("No results in this saved search")
+    else:
+        cols = ["file", "size", "tth", "nick", "hubUrl"]
+        available = list(results[0].keys()) if results else []
+        cols = [c for c in cols if c in available] or available[:5]
+        _print_table(results, cols)
+
+
+@search.command("purge")
+@click.argument("name", required=False, default=None)
+@click.option("--all", "purge_all", is_flag=True,
+              help="Purge all saved searches.")
+def search_purge(name, purge_all):
+    """Delete a saved search (or all saved searches).
+
+    \b
+    Examples:
+      eispy search purge ubuntu
+      eispy search purge --all
+    """
+    if purge_all:
+        count = purge_all_searches()
+        click.echo(f"Purged {count} saved search(es)")
+    elif name:
+        if purge_search(name):
+            click.echo(f"Purged saved search: {name}")
+        else:
+            click.echo(f"Saved search not found: {name}", err=True)
+            raise SystemExit(1)
+    else:
+        click.echo("Specify a search name or --all", err=True)
+        raise SystemExit(1)
 
 
 # ============================================================================
@@ -1174,7 +1482,8 @@ def queue_list(ctx, as_json):
 @click.option("--name", required=True, help="File name.")
 @click.option("--size", required=True, type=int, help="File size in bytes.")
 @click.option("--tth", required=True, help="TTH hash.")
-@click.option("--hub", "hub_url", default="", help="Hub URL (for source hint).")
+@click.option("--hub", "hub_url", default="", callback=_resolve_hub_cb,
+              help="Hub URL or alias (for source hint).")
 @click.option("--nick", default="", help="Source nick.")
 @click.pass_context
 def queue_add(ctx, directory, name, size, tth, hub_url, nick):
@@ -1522,7 +1831,7 @@ def filelist():
 
 
 @filelist.command("request")
-@click.argument("hub_url")
+@click.argument("hub_url", callback=_resolve_hub_cb)
 @click.argument("nick")
 @click.option("--match-queue", is_flag=True, help="Match files against download queue.")
 @click.pass_context

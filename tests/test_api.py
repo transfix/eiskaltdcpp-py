@@ -44,7 +44,7 @@ class MockDCClient:
 
     def __init__(self) -> None:
         self.is_initialized = True
-        self.version = "2.4.2-test"
+        self.version = "2.5.0.0-test"
         self._hubs: list[dict] = []
         self._users: dict[str, list[dict]] = {}
         self._chat_history: dict[str, list[str]] = {}
@@ -945,7 +945,7 @@ class TestStatusEndpoints:
         resp = app.get("/api/status", headers=auth_header(readonly_token))
         assert resp.status_code == 200
         data = resp.json()
-        assert data["version"] == "2.4.2-test"
+        assert data["version"] == "2.5.0.0-test"
         assert data["initialized"] is True
         assert "uptime_seconds" in data
 

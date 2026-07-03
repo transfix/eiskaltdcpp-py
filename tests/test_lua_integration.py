@@ -27,6 +27,7 @@ import os
 import sys
 import tempfile
 import textwrap
+import threading
 from pathlib import Path
 
 import pytest
@@ -47,6 +48,7 @@ if BUILD_DIR.exists():
 
 try:
     from eiskaltdcpp import AsyncDCClient, DCClient
+    from eiskaltdcpp.dc_client import EVENT_TYPES
     from eiskaltdcpp.exceptions import (
         LuaError,
         LuaLoadError,
@@ -80,9 +82,24 @@ def config_dir(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def dc_client(config_dir):
-    """Module-scoped synchronous DCClient."""
+    """Module-scoped synchronous DCClient.
+
+    On Windows, Lua scripting is disabled at compile time, so full
+    dcpp::startup() (which creates 22 managers and starts threads)
+    is unnecessary.  Use initializeMinimal() to avoid potential
+    Windows-specific startup issues while still exercising the
+    lua_is_available / lua_get_scripts_path / lua_list_scripts API.
+    """
     client = DCClient(config_dir)
-    client.initialize()
+    if sys.platform == "win32":
+        from eiskaltdcpp import dc_core
+        ok = client._bridge.initializeMinimal(config_dir + "/")
+        if ok:
+            client._initialized = True
+        else:
+            pytest.skip("initializeMinimal failed on Windows")
+    else:
+        client.initialize()
     yield client
     client.shutdown()
 
@@ -103,10 +120,21 @@ async def async_client(dc_client):
     Instead, we build an AsyncDCClient whose internal _sync_client points at
     the existing, already-running DCClient instance.
     """
-    # Create AsyncDCClient without a config_dir (we won't call initialize)
-    client = AsyncDCClient()
-    # Replace the internal (uninitialised) DCClient with the live one
+    # Use __new__ to avoid AsyncDCClient.__init__ creating an orphaned
+    # DCClient (its EisPyContext C++ destructor runs on GC and can
+    # interfere with the live instance on some platforms).
+    client = object.__new__(AsyncDCClient)
     client._sync_client = dc_client
+    client._loop = None
+    client._handlers = {ev: [] for ev in EVENT_TYPES}
+    client._lock = threading.Lock()
+    client._connect_events = {}
+    client._disconnect_events = {}
+    client._event_queues = []
+    client._pm_queue = asyncio.Queue()
+    client._search_queue = asyncio.Queue()
+    client._download_events = {}
+    client._download_results = {}
     # Wire callbacks so wait_connected / events work
     client._wire_callbacks()
     yield client
@@ -357,45 +385,47 @@ class TestAsyncLuaEval:
 
     @pytest.fixture(autouse=True)
     def _skip_if_no_lua(self, async_client):
-        if not async_client.lua_is_available():
+        if not async_client._sync_client.lua_is_available():
             pytest.skip("Lua scripting not available in this build")
         try:
-            async_client.lua_eval("-- probe")
+            async_client._sync_client.lua_eval("-- probe")
         except (LuaSymbolError, LuaError):
             pytest.skip("Lua eval not functional in this environment")
 
     @pytest.mark.asyncio
     async def test_async_eval_success(self, async_client):
-        async_client.lua_eval('print("async eval ok")')
+        await async_client.lua_eval('print("async eval ok")')
 
     @pytest.mark.asyncio
     async def test_async_eval_raises_on_error(self, async_client):
         with pytest.raises(LuaRuntimeError):
-            async_client.lua_eval('error("async test error")')
+            await async_client.lua_eval('error("async test error")')
 
     @pytest.mark.asyncio
     async def test_async_eval_file(self, async_client, tmp_path):
         script = tmp_path / "async_test.lua"
         script.write_text('assert(1 + 1 == 2)\n')
-        async_client.lua_eval_file(str(script))
+        await async_client.lua_eval_file(str(script))
 
 
 # ============================================================================
 # TLS encryption verification
 # ============================================================================
 
-HUB_URL = os.environ.get(
-    "TEST_HUB_URL", "nmdcs://wintermute.sublevels.net:411"
+HUB_URL = os.environ.get("TEST_HUB_URL", "")
+
+
+@pytest.mark.skipif(
+    not HUB_URL,
+    reason="TEST_HUB_URL not set — live-hub TLS tests require an explicit hub URL",
 )
-
-
 class TestTLSEncryption:
     """Verify TLS encryption fields are populated on hub connections.
 
     These tests connect to a live TLS hub and check that the HubInfo
-    struct exposes isSecure, isTrusted, and cipherName.  The default hub
-    is ``nmdcs://wintermute.sublevels.net:411``; override with the
-    ``TEST_HUB_URL`` environment variable.
+    struct exposes isSecure, isTrusted, and cipherName.  Set the
+    ``TEST_HUB_URL`` environment variable to enable, e.g.
+    ``TEST_HUB_URL=nmdcs://wintermute.sublevels.net:411``.
     """
 
     @pytest.mark.asyncio
@@ -414,7 +444,7 @@ class TestTLSEncryption:
             # Give the cipher info a moment to propagate
             await asyncio.sleep(2)
 
-            hubs = async_client.list_hubs()
+            hubs = await async_client.list_hubs()
             assert len(hubs) > 0, "Should have at least one hub"
 
             hub = next((h for h in hubs if HUB_URL in h.url), None)

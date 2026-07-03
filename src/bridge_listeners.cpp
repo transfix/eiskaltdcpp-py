@@ -4,17 +4,15 @@
  */
 
 #include "bridge_listeners.h"
-#include "bridge.h"
+#include "eispy_context.h"
 
 namespace eiskaltdcpp_py {
 
 void BridgeListeners::stashChat(const std::string& hubUrl,
                                 const std::string& nick,
                                 const std::string& text) {
-    if (!m_bridge) return;
-
-    std::lock_guard<std::mutex> lk(m_bridge->m_mutex);
-    auto* hd = m_bridge->findHub(hubUrl);
+    std::lock_guard<std::mutex> lk(bridge_.m_mutex);
+    auto* hd = bridge_.findHub(hubUrl);
     if (!hd) return;
 
     std::string formatted;
@@ -34,48 +32,43 @@ void BridgeListeners::stashChat(const std::string& hubUrl,
 }
 
 void BridgeListeners::stashSearchResult(const SearchResultInfo& info) {
-    if (!m_bridge) return;
-
-    std::lock_guard<std::mutex> lk(m_bridge->m_mutex);
+    std::lock_guard<std::mutex> lk(bridge_.m_mutex);
 
     // Store in the matching hub, or the first hub if no match
-    auto* hd = m_bridge->findHub(info.hubUrl);
+    auto* hd = bridge_.findHub(info.hubUrl);
     if (hd) {
         hd->searchResults.push_back(info);
-    } else if (!m_bridge->m_hubs.empty()) {
-        m_bridge->m_hubs.begin()->second.searchResults.push_back(info);
+    } else if (!bridge_.m_hubs.empty()) {
+        bridge_.m_hubs.begin()->second.searchResults.push_back(info);
     }
 }
 
 void BridgeListeners::stashUserUpdate(const std::string& hubUrl,
                                        const dcpp::OnlineUser& ou) {
-    if (!m_bridge) return;
-    std::lock_guard<std::mutex> lk(m_bridge->m_mutex);
-    auto* hd = m_bridge->findHub(hubUrl);
+    std::lock_guard<std::mutex> lk(bridge_.m_mutex);
+    auto* hd = bridge_.findHub(hubUrl);
     if (!hd) return;
     hd->users[ou.getIdentity().getNick()] = userFromOnlineUser(ou);
 }
 
 void BridgeListeners::stashUserRemove(const std::string& hubUrl,
                                        const std::string& nick) {
-    if (!m_bridge) return;
-    std::lock_guard<std::mutex> lk(m_bridge->m_mutex);
-    auto* hd = m_bridge->findHub(hubUrl);
+    std::lock_guard<std::mutex> lk(bridge_.m_mutex);
+    auto* hd = bridge_.findHub(hubUrl);
     if (!hd) return;
     hd->users.erase(nick);
 }
 
 void BridgeListeners::clearHubUsers(const std::string& hubUrl) {
-    if (!m_bridge) return;
-    std::lock_guard<std::mutex> lk(m_bridge->m_mutex);
-    auto* hd = m_bridge->findHub(hubUrl);
+    std::lock_guard<std::mutex> lk(bridge_.m_mutex);
+    auto* hd = bridge_.findHub(hubUrl);
     if (!hd) return;
     hd->users.clear();
 }
 
 void BridgeListeners::refreshHubCache(const std::string& hubUrl,
                                        dcpp::Client* c) {
-    if (!m_bridge || !c) return;
+    if (!c) return;
 
     // Read all Client* accessors HERE on the socket thread where it's safe.
     // Some of these (getUserCount) acquire NmdcHub::cs, which is recursive,
@@ -92,17 +85,16 @@ void BridgeListeners::refreshHubCache(const std::string& hubUrl,
     info.isTrusted  = c->isTrusted();
     info.cipherName = c->getCipherName();
 
-    // Now store the snapshot under m_mutex.
-    std::lock_guard<std::mutex> lk(m_bridge->m_mutex);
-    auto* hd = m_bridge->findHub(hubUrl);
+    // Now store the snapshot under bridge_.m_mutex.
+    std::lock_guard<std::mutex> lk(bridge_.m_mutex);
+    auto* hd = bridge_.findHub(hubUrl);
     if (!hd) return;
     hd->cachedInfo = std::move(info);
 }
 
 void BridgeListeners::markHubDisconnected(const std::string& hubUrl) {
-    if (!m_bridge) return;
-    std::lock_guard<std::mutex> lk(m_bridge->m_mutex);
-    auto* hd = m_bridge->findHub(hubUrl);
+    std::lock_guard<std::mutex> lk(bridge_.m_mutex);
+    auto* hd = bridge_.findHub(hubUrl);
     if (!hd) return;
     hd->cachedInfo.connected = false;
 }

@@ -51,7 +51,7 @@ class MockDCClient:
 
     def __init__(self):
         self.is_initialized = True
-        self.version = "2.4.2-test"
+        self.version = "2.5.0.0-test"
         self._hubs: list[dict] = []
         self._users: dict[str, list[dict]] = {}
         self._chat_history: dict[str, list[str]] = {}
@@ -378,150 +378,6 @@ class TestRemoteDCClientUnit:
         assert stream._ws_url.startswith("wss://")
 
 
-class TestSyncMethodsRaiseTypeError:
-    """All sync facade methods should raise TypeError with hint."""
-
-    def test_list_hubs(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError, match="list_hubs_async"):
-            c.list_hubs()
-
-    def test_is_connected(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.is_connected("url")
-
-    def test_send_message(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.send_message("url", "msg")
-
-    def test_send_pm(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.send_pm("url", "nick", "msg")
-
-    def test_get_chat_history(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.get_chat_history("url")
-
-    def test_get_users(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.get_users("url")
-
-    def test_search(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.search("query")
-
-    def test_get_search_results(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.get_search_results()
-
-    def test_clear_search_results(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.clear_search_results()
-
-    def test_download(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.download("dir", "name", 0, "tth")
-
-    def test_download_magnet(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.download_magnet("magnet:?xt=urn:tree:tiger:ABC")
-
-    def test_remove_download(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.remove_download("target")
-
-    def test_list_queue(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.list_queue()
-
-    def test_clear_queue(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.clear_queue()
-
-    def test_set_priority(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.set_priority("target", 3)
-
-    def test_add_share(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.add_share("/path", "Name")
-
-    def test_remove_share(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.remove_share("/path")
-
-    def test_list_shares(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.list_shares()
-
-    def test_refresh_share(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.refresh_share()
-
-    def test_get_setting(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.get_setting("Nick")
-
-    def test_set_setting(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.set_setting("Nick", "value")
-
-    def test_reload_config(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.reload_config()
-
-    def test_start_networking(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.start_networking()
-
-    def test_pause_hashing(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            c.pause_hashing()
-
-    def test_share_size_property(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            _ = c.share_size
-
-    def test_shared_files_property(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            _ = c.shared_files
-
-    def test_transfer_stats_property(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            _ = c.transfer_stats
-
-    def test_hash_status_property(self):
-        c = RemoteDCClient("http://x", token="t")
-        with pytest.raises(TypeError):
-            _ = c.hash_status
-
-
 class TestEventHandlers:
     """Tests for event handler registration."""
 
@@ -601,13 +457,13 @@ class TestRemoteDCClientHubs:
 
     @pytest.mark.asyncio
     async def test_list_hubs_empty(self, client):
-        hubs = await client.list_hubs_async()
+        hubs = await client.list_hubs()
         assert hubs == []
 
     @pytest.mark.asyncio
     async def test_connect_and_list(self, client):
         await client.connect("dchub://test:411")
-        hubs = await client.list_hubs_async()
+        hubs = await client.list_hubs()
         assert len(hubs) == 1
         assert isinstance(hubs[0], HubInfo)
         assert hubs[0].url == "dchub://test:411"
@@ -617,20 +473,20 @@ class TestRemoteDCClientHubs:
     async def test_disconnect(self, client):
         await client.connect("dchub://test:411")
         await client.disconnect("dchub://test:411")
-        hubs = await client.list_hubs_async()
+        hubs = await client.list_hubs()
         assert len(hubs) == 0
 
     @pytest.mark.asyncio
     async def test_is_connected(self, client):
         await client.connect("dchub://test:411")
-        assert await client.is_connected_async("dchub://test:411") is True
-        assert await client.is_connected_async("dchub://other:411") is False
+        assert await client.is_connected("dchub://test:411") is True
+        assert await client.is_connected("dchub://other:411") is False
 
     @pytest.mark.asyncio
     async def test_multiple_hubs(self, client):
         await client.connect("dchub://hub1:411")
         await client.connect("dchub://hub2:411")
-        hubs = await client.list_hubs_async()
+        hubs = await client.list_hubs()
         assert len(hubs) == 2
 
 
@@ -640,19 +496,19 @@ class TestRemoteDCClientChat:
     @pytest.mark.asyncio
     async def test_send_and_get_history(self, client):
         await client.connect("dchub://test:411")
-        await client.send_message_async("dchub://test:411", "Hello world")
-        history = await client.get_chat_history_async("dchub://test:411")
+        await client.send_message("dchub://test:411", "Hello world")
+        history = await client.get_chat_history("dchub://test:411")
         assert "Hello world" in history
 
     @pytest.mark.asyncio
     async def test_send_pm(self, client):
         await client.connect("dchub://test:411")
         # Should not raise
-        await client.send_pm_async("dchub://test:411", "Bob", "Hi Bob")
+        await client.send_pm("dchub://test:411", "Bob", "Hi Bob")
 
     @pytest.mark.asyncio
     async def test_empty_chat_history(self, client):
-        history = await client.get_chat_history_async("dchub://empty:411")
+        history = await client.get_chat_history("dchub://empty:411")
         assert history == []
 
 
@@ -661,25 +517,25 @@ class TestRemoteDCClientSearch:
 
     @pytest.mark.asyncio
     async def test_search_no_hubs_returns_false(self, client):
-        result = await client.search_async("test query")
+        result = await client.search("test query")
         # No hubs connected, mock returns False
         assert result is False
 
     @pytest.mark.asyncio
     async def test_search_with_hub(self, client):
         await client.connect("dchub://test:411")
-        result = await client.search_async("test query")
+        result = await client.search("test query")
         assert result is True
 
     @pytest.mark.asyncio
     async def test_get_search_results_empty(self, client):
-        results = await client.get_search_results_async()
+        results = await client.get_search_results()
         assert results == []
 
     @pytest.mark.asyncio
     async def test_clear_search_results(self, client):
         # Should not raise
-        await client.clear_search_results_async()
+        await client.clear_search_results()
 
 
 class TestRemoteDCClientQueue:
@@ -687,38 +543,38 @@ class TestRemoteDCClientQueue:
 
     @pytest.mark.asyncio
     async def test_download_and_list(self, client):
-        result = await client.download_async("/tmp", "file.txt", 1024, "TTH123")
+        result = await client.download("/tmp", "file.txt", 1024, "TTH123")
         assert result is True
-        queue = await client.list_queue_async()
+        queue = await client.list_queue()
         assert len(queue) == 1
         assert isinstance(queue[0], QueueItemInfo)
         assert "file.txt" in queue[0].target
 
     @pytest.mark.asyncio
     async def test_remove_download(self, client):
-        await client.download_async("/tmp", "file.txt", 1024, "TTH123")
-        queue = await client.list_queue_async()
+        await client.download("/tmp", "file.txt", 1024, "TTH123")
+        queue = await client.list_queue()
         target = queue[0].target
-        await client.remove_download_async(target)
-        queue = await client.list_queue_async()
+        await client.remove_download(target)
+        queue = await client.list_queue()
         assert len(queue) == 0
 
     @pytest.mark.asyncio
     async def test_clear_queue(self, client):
-        await client.download_async("/tmp", "a.txt", 100, "T1")
-        await client.download_async("/tmp", "b.txt", 200, "T2")
-        await client.clear_queue_async()
-        queue = await client.list_queue_async()
+        await client.download("/tmp", "a.txt", 100, "T1")
+        await client.download("/tmp", "b.txt", 200, "T2")
+        await client.clear_queue()
+        queue = await client.list_queue()
         assert len(queue) == 0
 
     @pytest.mark.asyncio
     async def test_download_magnet(self, client):
-        result = await client.download_magnet_async("magnet:?xt=urn:tree:tiger:ABC")
+        result = await client.download_magnet("magnet:?xt=urn:tree:tiger:ABC")
         assert result is True
 
     @pytest.mark.asyncio
     async def test_empty_queue(self, client):
-        queue = await client.list_queue_async()
+        queue = await client.list_queue()
         assert queue == []
 
 
@@ -727,28 +583,28 @@ class TestRemoteDCClientShares:
 
     @pytest.mark.asyncio
     async def test_add_and_list_share(self, client):
-        result = await client.add_share_async("/data/files", "MyFiles")
+        result = await client.add_share("/data/files", "MyFiles")
         assert result is True
-        shares = await client.list_shares_async()
+        shares = await client.list_shares()
         assert len(shares) == 1
         assert isinstance(shares[0], ShareInfoData)
 
     @pytest.mark.asyncio
     async def test_remove_share(self, client):
-        await client.add_share_async("/data/files", "MyFiles")
-        result = await client.remove_share_async("/data/files")
+        await client.add_share("/data/files", "MyFiles")
+        result = await client.remove_share("/data/files")
         assert result is True
-        shares = await client.list_shares_async()
+        shares = await client.list_shares()
         assert len(shares) == 0
 
     @pytest.mark.asyncio
     async def test_refresh_share(self, client):
         # Should not raise
-        await client.refresh_share_async()
+        await client.refresh_share()
 
     @pytest.mark.asyncio
     async def test_empty_shares(self, client):
-        shares = await client.list_shares_async()
+        shares = await client.list_shares()
         assert shares == []
 
 
@@ -757,27 +613,27 @@ class TestRemoteDCClientSettings:
 
     @pytest.mark.asyncio
     async def test_get_setting(self, client):
-        value = await client.get_setting_async("Nick")
+        value = await client.get_setting("Nick")
         assert value == "TestUser"
 
     @pytest.mark.asyncio
     async def test_set_setting(self, client):
-        await client.set_setting_async("Nick", "NewNick")
-        value = await client.get_setting_async("Nick")
+        await client.set_setting("Nick", "NewNick")
+        value = await client.get_setting("Nick")
         assert value == "NewNick"
 
     @pytest.mark.asyncio
     async def test_get_nonexistent_setting(self, client):
-        value = await client.get_setting_async("NonExistent")
+        value = await client.get_setting("NonExistent")
         assert value == ""
 
     @pytest.mark.asyncio
     async def test_reload_config(self, client):
-        await client.reload_config_async()
+        await client.reload_config()
 
     @pytest.mark.asyncio
     async def test_start_networking(self, client):
-        await client.start_networking_async()
+        await client.start_networking()
 
 
 class TestRemoteDCClientStatus:

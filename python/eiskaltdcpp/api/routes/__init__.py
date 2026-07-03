@@ -10,6 +10,14 @@ from eiskaltdcpp.api.routes.search import router as search_router
 from eiskaltdcpp.api.routes.settings import router as settings_router
 from eiskaltdcpp.api.routes.shares import router as shares_router
 from eiskaltdcpp.api.routes.status import router as status_router
+from eiskaltdcpp.api.routes.favorites import router as favorites_router
+from eiskaltdcpp.api.routes.throttle import router as throttle_router
+from eiskaltdcpp.api.routes.connectivity import router as connectivity_router
+from eiskaltdcpp.api.routes.crypto import router as crypto_router
+from eiskaltdcpp.api.routes.logs import router as logs_router
+from eiskaltdcpp.api.routes.finished import router as finished_router
+from eiskaltdcpp.api.routes.ipfilter import router as ipfilter_router
+from eiskaltdcpp.api.routes.adl import router as adl_router
 from eiskaltdcpp.api.dashboard import router as dashboard_router
 from eiskaltdcpp.api.websocket import router as ws_router
 
@@ -23,6 +31,14 @@ all_routers = [
     settings_router,
     lua_router,
     status_router,
+    favorites_router,
+    throttle_router,
+    connectivity_router,
+    crypto_router,
+    logs_router,
+    finished_router,
+    ipfilter_router,
+    adl_router,
     ws_router,
     dashboard_router,
 ]
