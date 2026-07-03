@@ -84,8 +84,15 @@ cd build && ctest -V
 sudo apt install \
     cmake swig python3-dev \
     libssl-dev zlib1g-dev libbz2-dev \
+    liblua5.4-dev \
+    libpcre2-dev libminiupnpc-dev libidn2-dev gettext \
     libeiskaltdcpp-dev   # optional — built from source if missing
 ```
+
+> **Note:** `liblua5.4-dev` (Lua 5.2+) is required — the client is built
+> with Lua scripting enabled (`LUA_SCRIPT=ON`), and the bridge must link
+> against Lua to match the core ABI. Substitute `liblua5.3-dev` if 5.4
+> isn't available on your distro.
 
 ## CMake options
 
