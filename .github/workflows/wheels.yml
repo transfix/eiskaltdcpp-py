@@ -47,9 +47,6 @@ jobs:
           - os: macos
             arch: arm64
             runner: macos-latest
-          - os: macos
-            arch: x86_64
-            runner: macos-13
 
     steps:
       - uses: actions/checkout@v4
@@ -164,7 +161,9 @@ jobs:
             LD_LIBRARY_PATH="$HOME/.eiskaltdcpp-sdk/core/lib"
             CMAKE_ARGS="-DUSE_SYSTEM_EISKALTDCPP=OFF
             -DEISKALTDCPP_SDK_DIR=$HOME/.eiskaltdcpp-sdk/core"
-          CIBW_TEST_REQUIRES: pytest bcrypt
+          # Install the wheel's own test-related extras (fastapi, httpx,
+          # bcrypt, pydantic, pytest, ...) so the test suite's imports resolve.
+          CIBW_TEST_EXTRAS: "api,test,api-test"
           CIBW_TEST_COMMAND: >
             python -m pytest {project}/tests/ -v --tb=short
             --ignore={project}/tests/test_integration.py
