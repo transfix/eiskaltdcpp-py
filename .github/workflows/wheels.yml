@@ -165,13 +165,12 @@ jobs:
           # Install the wheel's own test-related extras (fastapi, httpx,
           # bcrypt, pydantic, pytest, ...) so the test suite's imports resolve.
           CIBW_TEST_EXTRAS: "api,test,api-test"
-          # cd into {project} so `python -m pytest` puts the project root on
-          # sys.path; the tests package has no __init__.py and some tests do
-          # `from tests.test_websocket import ...` (implicit namespace pkg).
+          # pytest's pythonpath=["."] (see pyproject.toml) puts the project
+          # root on sys.path so `from tests.test_websocket import ...` resolves
+          # on every platform without relying on the working directory.
           CIBW_TEST_COMMAND: >
-            cd {project} &&
-            python -m pytest tests/ -v --tb=short
-            --ignore=tests/test_integration.py
+            python -m pytest {project}/tests/ -v --tb=short
+            --ignore={project}/tests/test_integration.py
 
       - name: Compute artifact name
         id: artifact

@@ -97,6 +97,11 @@ packages = [{include = "eiskaltdcpp", from = "python"}]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Put the project root (rootdir, where this file lives) on sys.path so tests
+# that do `from tests.test_websocket import ...` resolve. Works regardless of
+# the current working directory, which matters for cibuildwheel on Windows
+# (its temp cwd is on a different drive than the checkout).
+pythonpath = ["."]
 addopts = "-v --tb=short -m 'not integration'"
 markers = [
     "integration: live hub integration tests (require network access)",
