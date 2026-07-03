@@ -373,6 +373,7 @@ class TestEventCallback:
             "onHubRedirect", "onHubPasswordRequest", "onHubUpdated",
             "onNickTaken", "onHubFull",
             "onChatMessage", "onPrivateMessage", "onStatusMessage",
+            "onNmdcPbMessage",
             "onUserConnected", "onUserDisconnected", "onUserUpdated",
             "onSearchResult",
             "onQueueItemAdded", "onQueueItemFinished", "onQueueItemRemoved",
@@ -497,6 +498,7 @@ class TestDCClientWrapper:
             "hub_redirect", "hub_get_password", "hub_updated",
             "hub_nick_taken", "hub_full",
             "chat_message", "private_message", "status_message",
+            "pb_message",
             "user_connected", "user_disconnected", "user_updated",
             "search_result",
             "queue_item_added", "queue_item_finished", "queue_item_removed",
@@ -630,4 +632,207 @@ class TestAsyncDCClient:
         client = AsyncDCClient(str(unique_config_dir))
         stream = client.events()
         assert stream is not None
+
+
+# ============================================================================
+# NMDCpb protobuf bridge tests
+# ============================================================================
+
+class TestNmdcPbBridge:
+    """Tests for NMDCpb protobuf messaging exposed through the SWIG bridge."""
+
+    # ------------------------------------------------------------------
+    # SWIG-level: DCBridge methods exist
+    # ------------------------------------------------------------------
+
+    def test_bridge_has_pb_broadcast(self):
+        """DCBridge exposes pbBroadcast method."""
+        assert hasattr(dc_core.DCBridge, "pbBroadcast")
+
+    def test_bridge_has_pb_routed(self):
+        """DCBridge exposes pbRouted method."""
+        assert hasattr(dc_core.DCBridge, "pbRouted")
+
+    def test_bridge_has_hub_supports_nmdcpb(self):
+        """DCBridge exposes hubSupportsNmdcPb method."""
+        assert hasattr(dc_core.DCBridge, "hubSupportsNmdcPb")
+
+    # ------------------------------------------------------------------
+    # SWIG-level: DCClientCallback has onNmdcPbMessage
+    # ------------------------------------------------------------------
+
+    def test_callback_has_on_nmdcpb_message(self):
+        """DCClientCallback exposes onNmdcPbMessage virtual."""
+        cb = dc_core.DCClientCallback()
+        assert hasattr(cb, "onNmdcPbMessage")
+        assert callable(cb.onNmdcPbMessage)
+
+    def test_callback_on_nmdcpb_message_callable(self):
+        """onNmdcPbMessage can be called directly without error."""
+        cb = dc_core.DCClientCallback()
+        # Default implementation is a no-op
+        cb.onNmdcPbMessage("dchub://test:411", "$PB", "nick", "AAAA")
+
+    def test_callback_on_nmdcpb_message_subclass(self):
+        """onNmdcPbMessage can be overridden in a Python subclass."""
+        received = []
+
+        class PbCallback(dc_core.DCClientCallback):
+            def __init__(self):
+                super().__init__()
+
+            def onNmdcPbMessage(self, hubUrl, cmd, nick, data):
+                received.append((hubUrl, cmd, nick, data))
+
+        cb = PbCallback()
+        cb.onNmdcPbMessage("dchub://test:411", "$PBB", "alice", "base64==")
+        assert len(received) == 1
+        assert received[0] == ("dchub://test:411", "$PBB", "alice", "base64==")
+
+    # ------------------------------------------------------------------
+    # DCClient-level: pb_message event & send methods
+    # ------------------------------------------------------------------
+
+    def test_dc_client_pb_message_event(self, unique_config_dir):
+        """DCClient supports pb_message event registration."""
+        from eiskaltdcpp.dc_client import DCClient
+        client = DCClient(str(unique_config_dir))
+
+        received = []
+
+        @client.on("pb_message")
+        def on_pb(hub_url, cmd, nick, data):
+            received.append((hub_url, cmd, nick, data))
+
+        assert len(received) == 0  # registered, not called
+
+    def test_dc_client_has_send_pb(self, unique_config_dir):
+        """DCClient has send_pb method."""
+        from eiskaltdcpp.dc_client import DCClient
+        client = DCClient(str(unique_config_dir))
+        assert hasattr(client, "send_pb")
+        assert callable(client.send_pb)
+
+    def test_dc_client_has_send_pb_routed(self, unique_config_dir):
+        """DCClient has send_pb_routed method."""
+        from eiskaltdcpp.dc_client import DCClient
+        client = DCClient(str(unique_config_dir))
+        assert hasattr(client, "send_pb_routed")
+        assert callable(client.send_pb_routed)
+
+    def test_dc_client_has_hub_supports_nmdcpb(self, unique_config_dir):
+        """DCClient has hub_supports_nmdcpb method."""
+        from eiskaltdcpp.dc_client import DCClient
+        client = DCClient(str(unique_config_dir))
+        assert hasattr(client, "hub_supports_nmdcpb")
+        assert callable(client.hub_supports_nmdcpb)
+
+    # ------------------------------------------------------------------
+    # AsyncDCClient-level: PB methods & queue
+    # ------------------------------------------------------------------
+
+    def test_async_client_has_send_pb(self, unique_config_dir):
+        """AsyncDCClient has send_pb method."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+        assert hasattr(client, "send_pb")
+
+    def test_async_client_has_send_pb_routed(self, unique_config_dir):
+        """AsyncDCClient has send_pb_routed method."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+        assert hasattr(client, "send_pb_routed")
+
+    def test_async_client_has_hub_supports_nmdcpb(self, unique_config_dir):
+        """AsyncDCClient has hub_supports_nmdcpb method."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+        assert hasattr(client, "hub_supports_nmdcpb")
+
+    def test_async_client_has_wait_pb_message(self, unique_config_dir):
+        """AsyncDCClient has wait_pb_message coroutine."""
+        import asyncio
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+        assert hasattr(client, "wait_pb_message")
+        assert asyncio.iscoroutinefunction(client.wait_pb_message)
+
+    def test_async_client_has_pb_queue(self, unique_config_dir):
+        """AsyncDCClient initializes _pb_queue."""
+        import asyncio
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+        assert hasattr(client, "_pb_queue")
+        assert isinstance(client._pb_queue, asyncio.Queue)
+
+    def test_async_client_pb_event_registration(self, unique_config_dir):
+        """AsyncDCClient supports pb_message event registration."""
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+
+        received = []
+        client.on("pb_message", lambda *args: received.append(args))
+        assert len(received) == 0
+
+    @pytest.mark.asyncio
+    async def test_wait_pb_message_timeout(self, unique_config_dir):
+        """wait_pb_message raises TimeoutError when no message arrives."""
+        import asyncio
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+
+        with pytest.raises(asyncio.TimeoutError, match="No PB message"):
+            await client.wait_pb_message(timeout=0.1)
+
+    @pytest.mark.asyncio
+    async def test_wait_pb_message_receives(self, unique_config_dir):
+        """wait_pb_message returns a protobuf message from the queue."""
+        import asyncio
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+
+        # Inject a message directly into the queue
+        msg = ("dchub://test:411", "$PBB", "sender", "cHJvdG9idWY=")
+        client._pb_queue.put_nowait(msg)
+
+        result = await client.wait_pb_message(timeout=1.0)
+        assert result == msg
+
+    @pytest.mark.asyncio
+    async def test_wait_pb_message_filters_cmd(self, unique_config_dir):
+        """wait_pb_message filters by cmd when specified."""
+        import asyncio
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+
+        client._pb_queue.put_nowait(
+            ("dchub://test:411", "$PB", "alice", "data1")
+        )
+        client._pb_queue.put_nowait(
+            ("dchub://test:411", "$PBR", "bob", "data2")
+        )
+
+        result = await client.wait_pb_message(cmd="$PBR", timeout=1.0)
+        assert result[1] == "$PBR"
+        assert result[2] == "bob"
+
+    @pytest.mark.asyncio
+    async def test_wait_pb_message_filters_nick(self, unique_config_dir):
+        """wait_pb_message filters by from_nick when specified."""
+        import asyncio
+        from eiskaltdcpp.async_client import AsyncDCClient
+        client = AsyncDCClient(str(unique_config_dir))
+
+        client._pb_queue.put_nowait(
+            ("dchub://test:411", "$PBB", "alice", "data1")
+        )
+        client._pb_queue.put_nowait(
+            ("dchub://test:411", "$PBB", "bob", "data2")
+        )
+
+        result = await client.wait_pb_message(
+            from_nick="bob", timeout=1.0
+        )
+        assert result[2] == "bob"
+        assert result[3] == "data2"
 

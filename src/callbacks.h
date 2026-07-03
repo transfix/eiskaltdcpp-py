@@ -148,6 +148,20 @@ public:
                                   int64_t size) {}
 
     // =====================================================================
+    // NMDCpb protobuf events
+    // =====================================================================
+
+    /// NMDCpb protobuf message received from hub.
+    /// @param hubUrl  The hub URL
+    /// @param cmd     The command: "$PB", "$PBB", or "$PBR"
+    /// @param nick    Sender nick (for $PB/$PBB) or target nick (for $PBR)
+    /// @param data    Base64url-encoded protobuf payload
+    virtual void onNmdcPbMessage(const std::string& hubUrl,
+                                const std::string& cmd,
+                                const std::string& nick,
+                                const std::string& data) {}
+
+    // =====================================================================
     // Queue events
     // =====================================================================
 

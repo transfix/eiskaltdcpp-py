@@ -355,6 +355,28 @@ class RemoteDCClient:
             await asyncio.sleep(1)
         return False
 
+    # -- NMDCpb protobuf methods -------------------------------------------
+
+    async def send_pb(self, hub_url: str, base64data: str) -> None:
+        await self._send("send_pb", {"hub_url": hub_url, "base64data": base64data})
+
+    async def send_pb_routed(self, hub_url: str, to_nick: str, base64data: str) -> None:
+        await self._send("send_pb_routed", {"hub_url": hub_url, "to_nick": to_nick, "base64data": base64data})
+
+    async def hub_supports_nmdcpb(self, hub_url: str) -> bool:
+        return await self._send("hub_supports_nmdcpb", {"hub_url": hub_url})
+
+    async def wait_pb_message(self, cmd: str | None = None, from_nick: str | None = None, timeout: float = 20) -> dict:
+        return await self._send("wait_pb_message", {"cmd": cmd, "from_nick": from_nick, "timeout": timeout}, timeout=timeout + 10)
+
+    # -- Additional methods for example patterns ---------------------------
+
+    async def send_chat_message(self, hub_url: str, message: str) -> None:
+        await self._send("send_chat_message", {"hub_url": hub_url, "message": message})
+
+    async def get_transfer_stats(self) -> dict:
+        return await self._send("get_transfer_stats")
+
     async def close(self) -> None:
         """Shut down the worker subprocess."""
         if self._closed:

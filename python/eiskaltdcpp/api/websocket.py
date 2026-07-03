@@ -79,6 +79,8 @@ EVENT_CHANNELS: dict[str, set[Channel]] = {
     "upload_complete": {Channel.transfers, Channel.events},
     # Hash events
     "hash_progress": {Channel.transfers, Channel.events},
+    # NMDCpb protobuf events
+    "pb_message": {Channel.chat, Channel.events},
 }
 
 # Re-export EVENT_ARG_NAMES for backward compatibility

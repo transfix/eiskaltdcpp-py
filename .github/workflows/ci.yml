@@ -344,5 +344,6 @@ jobs:
           PYTHONPATH: build/python
         run: |
           python -m pytest tests/test_integration.py tests/test_file_transfer.py \
+            tests/test_examples_integration.py \
             -v --tb=long --timeout=300 -x \
             -o "addopts="

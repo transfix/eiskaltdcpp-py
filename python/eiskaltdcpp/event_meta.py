@@ -35,4 +35,6 @@ EVENT_ARG_NAMES: dict[str, tuple[str, ...]] = {
     "upload_starting": ("file", "nick", "size"),
     "upload_complete": ("file", "nick", "size"),
     "hash_progress": ("current_file", "files_left", "bytes_left"),
+    # NMDCpb protobuf events
+    "pb_message": ("hub_url", "cmd", "nick", "data"),
 }

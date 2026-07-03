@@ -27,7 +27,7 @@ env:
   # Core release tag whose prebuilt SDK archives are consumed (best-effort).
   # If the matching SDK asset is missing, the build falls back to compiling
   # the core from source via FetchContent (see CMakeLists.txt).
-  EISKALTDCPP_CORE_TAG: v2.5.0
+  EISKALTDCPP_CORE_TAG: v2.6.0
 
 jobs:
   # ─── Build wheels ───────────────────────────────────────────────

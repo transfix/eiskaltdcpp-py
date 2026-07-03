@@ -6,7 +6,7 @@
 #
 
 cmake_minimum_required(VERSION 3.14)
-project(eiskaltdcpp-py VERSION 2.5.0.0 LANGUAGES CXX)
+project(eiskaltdcpp-py VERSION 2.6.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -152,8 +152,18 @@ if(EISKALTDCPP_INCLUDE_DIR AND EISKALTDCPP_LIBRARY)
                             "ABI mismatch may cause crashes!")
             set(EISKALTDCPP_HAS_LUA FALSE)
         endif()
+
+        # WITH_DHT adds a dht_ unique_ptr member to DCContext, changing
+        # the memory layout.  Detect it via the DHT header.
+        if(EXISTS "${EISKALTDCPP_INCLUDE_DIR}/dht/DHT.h")
+            message(STATUS "System libeiskaltdcpp has DHT support — enabling WITH_DHT for ABI compat")
+            set(EISKALTDCPP_HAS_DHT TRUE)
+        else()
+            set(EISKALTDCPP_HAS_DHT FALSE)
+        endif()
     else()
         set(EISKALTDCPP_HAS_LUA FALSE)
+        set(EISKALTDCPP_HAS_DHT FALSE)
     endif()
 endif()
 
@@ -162,8 +172,8 @@ if(NOT EISKALTDCPP_FOUND)
 
     FetchContent_Declare(eiskaltdcpp
         GIT_REPOSITORY https://github.com/transfix/eiskaltdcpp.git
-        # Pinned to the v2.5.0 release tag (full SHA for reproducible clones)
-        GIT_TAG        3f01cb083a2b2d83c5944dd69d451df8401cc692
+        # Pinned to the v2.6.0 release tag (full SHA for reproducible clones)
+        GIT_TAG        e3e4a9f37a191b1b11c1c621ba61b17e6bf982e9
     )
 
     # Disable everything except the core library
@@ -225,6 +235,16 @@ if(NOT EISKALTDCPP_FOUND)
     else()
         message(WARNING "LUA_SCRIPT enabled but Lua dev headers not found in container — ABI mismatch possible")
         set(EISKALTDCPP_HAS_LUA FALSE)
+    endif()
+
+    # WITH_DHT changes DCContext class layout (adds dht_ unique_ptr member).
+    # The eiskaltdcpp top-level CMakeLists.txt uses add_definitions(-DWITH_DHT)
+    # which only applies within its directory scope, so we must propagate
+    # it ourselves for the bridge ABI to match.
+    if(WITH_DHT)
+        set(EISKALTDCPP_HAS_DHT TRUE)
+    else()
+        set(EISKALTDCPP_HAS_DHT FALSE)
     endif()
 
     set(EISKALTDCPP_FOUND TRUE)

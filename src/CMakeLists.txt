@@ -73,3 +73,9 @@ if(EISKALTDCPP_HAS_LUA)
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
 endif()
+
+# WITH_DHT changes DCContext class layout (adds dht_ unique_ptr member).
+# Must match the eiskaltdcpp library ABI.
+if(EISKALTDCPP_HAS_DHT)
+    target_compile_definitions(eiskaltdcpp_py_bridge PUBLIC WITH_DHT)
+endif()
