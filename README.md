@@ -17,6 +17,8 @@ This project wraps the eiskaltdcpp core C++ library via SWIG, providing:
 
 - Connect to NMDC and ADC hubs (with TLS encryption support)
 - Public and private chat
+- **NMDCpb** — structured protobuf messaging overlay for NMDC hubs (opt-in via `$Supports`,
+  backward-compatible with legacy clients)
 - File search across connected hubs
 - Download queue management (including magnet links)
 - File list browsing and downloading
@@ -37,7 +39,7 @@ pip install eiskaltdcpp-py
 
 Pre-built wheels are available for Python 3.10–3.13 on:
 - **Linux** x86_64 (manylinux_2_28)
-- **macOS** arm64 (Apple Silicon) and x86_64 (Intel)
+- **macOS** arm64 (Apple Silicon)
 - **Windows** AMD64
 
 All C++ dependencies are bundled — no system packages needed.
@@ -140,6 +142,45 @@ client.refresh_share()
 print(f'Sharing {client.shared_files} files ({client.share_size} bytes)')
 ```
 
+### NMDCpb protobuf messaging
+
+**NMDCpb** is a structured-messaging overlay for NMDC hubs. It replaces ad-hoc
+text commands with Protocol Buffers serialized messages negotiated per-connection
+via `$Supports`. It is fully backward-compatible: hubs route protobuf to NMDCpb
+peers and plain `<nick> text|` to legacy clients simultaneously. NMDCpb is the
+foundation for the end-to-end encrypted PM, media, relay, and channel features.
+
+```python
+from eiskaltdcpp import DCClient
+
+with DCClient('/tmp/dc-config') as client:
+    @client.on('pb_message')
+    def on_pb(hub_url, cmd, nick, data):
+        # data is a base64url-encoded PbEnvelope payload
+        print(f'{cmd} from {nick}: {data}')
+
+    client.connect('dchub://hub.example.com:411')
+
+    import time
+    time.sleep(3)  # wait for the $Supports handshake to complete
+
+    if client.hub_supports_nmdcpb('dchub://hub.example.com:411'):
+        # Broadcast a $PB protobuf message to all NMDCpb peers on the hub
+        client.send_pb('dchub://hub.example.com:411', base64_envelope)
+        # Send a $PBR routed protobuf message to a specific user
+        client.send_pb_routed('dchub://hub.example.com:411', 'Alice', base64_envelope)
+```
+
+| Method | Wire command | Description |
+|--------|-------------|-------------|
+| `hub_supports_nmdcpb(hub_url)` | — | Whether the hub advertised `NMDCpb` in `$Supports` |
+| `send_pb(hub_url, base64data)` | `$PB` | Broadcast a protobuf message to all NMDCpb peers |
+| `send_pb_routed(hub_url, to_nick, base64data)` | `$PBR` | Route a protobuf message to one user |
+
+The same API is available on `AsyncDCClient`, which additionally provides
+`await client.wait_pb_message(cmd=..., from_nick=..., timeout=...)` for
+awaiting a specific inbound protobuf message.
+
 ### Event types
 
 | Event | Arguments |
@@ -168,6 +209,7 @@ print(f'Sharing {client.shared_files} files ({client.share_size} bytes)')
 | `upload_starting` | `transfer_info` |
 | `upload_complete` | `transfer_info` |
 | `hash_progress` | `current_file, files_left, bytes_left` |
+| `pb_message` | `hub_url, cmd, nick, data` (NMDCpb protobuf) |
 
 ## Examples
 
