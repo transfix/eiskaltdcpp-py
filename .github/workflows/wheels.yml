@@ -88,6 +88,11 @@ jobs:
           CIBW_ARCHS_LINUX: x86_64
           CIBW_ARCHS_WINDOWS: AMD64
           CIBW_ARCHS_MACOS: ${{ matrix.arch }}
+          # The prebuilt macOS core SDK is built with
+          # CMAKE_OSX_DEPLOYMENT_TARGET=13.0, so the wheel (and its platform
+          # tag) must target 13.0 too — otherwise delocate rejects the
+          # vendored dylib as requiring a newer OS than the wheel claims.
+          MACOSX_DEPLOYMENT_TARGET: "13.0"
 
           # ── Linux ───────────────────────────────────────────────
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
@@ -164,9 +169,13 @@ jobs:
           # Install the wheel's own test-related extras (fastapi, httpx,
           # bcrypt, pydantic, pytest, ...) so the test suite's imports resolve.
           CIBW_TEST_EXTRAS: "api,test,api-test"
+          # cd into {project} so `python -m pytest` puts the project root on
+          # sys.path; the tests package has no __init__.py and some tests do
+          # `from tests.test_websocket import ...` (implicit namespace pkg).
           CIBW_TEST_COMMAND: >
-            python -m pytest {project}/tests/ -v --tb=short
-            --ignore={project}/tests/test_integration.py
+            cd {project} &&
+            python -m pytest tests/ -v --tb=short
+            --ignore=tests/test_integration.py
 
       - name: Compute artifact name
         id: artifact
