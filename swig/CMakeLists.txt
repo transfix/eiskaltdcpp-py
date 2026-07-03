@@ -211,14 +211,22 @@ else()
 endif()
 
 # Install the SWIG module
-# NOTE: a Python extension is a MODULE library on Unix (-> LIBRARY) but a DLL
-# on Windows (-> RUNTIME). Both destinations must be given or the .pyd is
-# silently omitted from the Windows wheel ("cannot import name '_dc_core'").
-install(TARGETS dc_core
-    LIBRARY DESTINATION ${_PY_INSTALL_DIR}
-    RUNTIME DESTINATION ${_PY_INSTALL_DIR}
-    COMPONENT PythonModule
-)
+# A Python extension is a MODULE/LIBRARY artifact on Unix but a DLL (RUNTIME)
+# on Windows, so the artifact-kind destination differs per platform. Install
+# per-platform: LIBRARY on Unix (unchanged, known-good), RUNTIME on Windows so
+# _dc_core.pyd actually lands in the wheel. NOTE: adding RUNTIME unconditionally
+# was observed to drop the Unix .so from the wheel, so keep them separate.
+if(WIN32)
+    install(TARGETS dc_core
+        RUNTIME DESTINATION ${_PY_INSTALL_DIR}
+        COMPONENT PythonModule
+    )
+else()
+    install(TARGETS dc_core
+        LIBRARY DESTINATION ${_PY_INSTALL_DIR}
+        COMPONENT PythonModule
+    )
+endif()
 
 install(FILES
     ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/dc_core.py
