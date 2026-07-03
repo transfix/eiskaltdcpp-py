@@ -3,7 +3,7 @@
 #
 # Follows the pattern from verlihub/src/swig/CMakeLists.txt:
 #   - Uses swig_add_library() with the .i file
-#   - Links against our static bridge library + Python3::Python
+#   - Links against our static bridge library + Python3::Module
 #   - Outputs _dc_core.so and dc_core.py to python/eiskaltdcpp/
 #
 
@@ -37,10 +37,14 @@ target_include_directories(dc_core
 )
 
 # Link against bridge static library and Python
+# Use Python3::Module (not Python3::Python/Embed): extension modules must not
+# link libpython on Unix (symbols resolve at load time), while Windows still
+# links pythonXX.lib. Python3::Module handles this correctly per-platform and
+# works in manylinux where a linkable libpython is unavailable.
 target_link_libraries(dc_core
     PRIVATE
         eiskaltdcpp_py_bridge
-        Python3::Python
+        Python3::Module
 )
 
 # Set output name: _dc_core.so (SWIG convention: underscore prefix)
@@ -66,6 +70,15 @@ else()
     set(_DC_CORE_SUFFIX ".so")
 endif()
 set_target_properties(dc_core PROPERTIES SUFFIX "${_DC_CORE_SUFFIX}")
+
+# When consuming a prebuilt shared core (SDK or system), the extension records
+# the core lib as a RUNPATH (Linux) / @rpath (macOS) dependency. Add the lib
+# directory as an RPATH so auditwheel/delocate can locate and vendor it into
+# the wheel during repair. Harmless on Windows (no rpath concept).
+if(EISKALTDCPP_LIB_DIR AND NOT WIN32)
+    set_property(TARGET dc_core APPEND PROPERTY BUILD_RPATH "${EISKALTDCPP_LIB_DIR}")
+    set_property(TARGET dc_core APPEND PROPERTY INSTALL_RPATH "${EISKALTDCPP_LIB_DIR}")
+endif()
 
 # ---------------------------------------------------------------------------
 # Windows: Copy vcpkg runtime DLLs alongside the .pyd
@@ -198,10 +211,22 @@ else()
 endif()
 
 # Install the SWIG module
-install(TARGETS dc_core
-    LIBRARY DESTINATION ${_PY_INSTALL_DIR}
-    COMPONENT PythonModule
-)
+# A Python extension is a MODULE/LIBRARY artifact on Unix but a DLL (RUNTIME)
+# on Windows, so the artifact-kind destination differs per platform. Install
+# per-platform: LIBRARY on Unix (unchanged, known-good), RUNTIME on Windows so
+# _dc_core.pyd actually lands in the wheel. NOTE: adding RUNTIME unconditionally
+# was observed to drop the Unix .so from the wheel, so keep them separate.
+if(WIN32)
+    install(TARGETS dc_core
+        RUNTIME DESTINATION ${_PY_INSTALL_DIR}
+        COMPONENT PythonModule
+    )
+else()
+    install(TARGETS dc_core
+        LIBRARY DESTINATION ${_PY_INSTALL_DIR}
+        COMPONENT PythonModule
+    )
+endif()
 
 install(FILES
     ${CMAKE_BINARY_DIR}/python/eiskaltdcpp/dc_core.py
