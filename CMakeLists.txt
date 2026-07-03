@@ -33,7 +33,11 @@ set(EISKALTDCPP_SDK_DIR "" CACHE PATH
 # Find Python
 # ===========================================================================
 
-find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+# Development.Module (headers + the Python3::Module target) is all a Python
+# extension needs. Requesting the full Development component pulls in
+# Development.Embed, which requires a linkable libpython that is absent in
+# manylinux images, breaking the cibuildwheel Linux build.
+find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED)
 
 if(Python3_VERSION VERSION_LESS "3.10")
     message(FATAL_ERROR "Python 3.10 or higher required, found ${Python3_VERSION}")

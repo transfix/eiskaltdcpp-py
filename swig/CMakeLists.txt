@@ -3,7 +3,7 @@
 #
 # Follows the pattern from verlihub/src/swig/CMakeLists.txt:
 #   - Uses swig_add_library() with the .i file
-#   - Links against our static bridge library + Python3::Python
+#   - Links against our static bridge library + Python3::Module
 #   - Outputs _dc_core.so and dc_core.py to python/eiskaltdcpp/
 #
 
@@ -37,10 +37,14 @@ target_include_directories(dc_core
 )
 
 # Link against bridge static library and Python
+# Use Python3::Module (not Python3::Python/Embed): extension modules must not
+# link libpython on Unix (symbols resolve at load time), while Windows still
+# links pythonXX.lib. Python3::Module handles this correctly per-platform and
+# works in manylinux where a linkable libpython is unavailable.
 target_link_libraries(dc_core
     PRIVATE
         eiskaltdcpp_py_bridge
-        Python3::Python
+        Python3::Module
 )
 
 # Set output name: _dc_core.so (SWIG convention: underscore prefix)
