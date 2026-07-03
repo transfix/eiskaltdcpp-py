@@ -46,7 +46,7 @@ jobs:
             runner: windows-latest
           - os: macos
             arch: arm64
-            runner: macos-latest
+            runner: macos-14
 
     steps:
       - uses: actions/checkout@v4
@@ -88,11 +88,6 @@ jobs:
           CIBW_ARCHS_LINUX: x86_64
           CIBW_ARCHS_WINDOWS: AMD64
           CIBW_ARCHS_MACOS: ${{ matrix.arch }}
-          # The prebuilt macOS core SDK is built with
-          # CMAKE_OSX_DEPLOYMENT_TARGET=13.0, so the wheel (and its platform
-          # tag) must target 13.0 too — otherwise delocate rejects the
-          # vendored dylib as requiring a newer OS than the wheel claims.
-          MACOSX_DEPLOYMENT_TARGET: "13.0"
 
           # ── Linux ───────────────────────────────────────────────
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
@@ -152,6 +147,7 @@ jobs:
           # highest-versioned GCC is therefore resolved in CIBW_BEFORE_ALL_MACOS
           # (real bash) and exposed via stable symlinks under $HOME/.gccwrap.
           CIBW_ENVIRONMENT_MACOS: >
+            MACOSX_DEPLOYMENT_TARGET="14.0"
             CPATH="$(brew --prefix)/include"
             LIBRARY_PATH="$(brew --prefix)/lib"
             CMAKE_ARGS="-DUSE_SYSTEM_EISKALTDCPP=OFF
