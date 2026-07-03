@@ -16,6 +16,7 @@ This project wraps the eiskaltdcpp core C++ library via SWIG, providing:
 ### Features
 
 - Connect to NMDC and ADC hubs (with TLS encryption support)
+- Hub aliases — short names for hub URLs (`eispy hub alias add …`), usable anywhere a hub URL is accepted
 - Public and private chat
 - **NMDCpb** — structured protobuf messaging overlay for NMDC hubs (opt-in via `$Supports`,
   backward-compatible with legacy clients)
@@ -385,6 +386,32 @@ eispy hub connect dchub://hub.example.com --encoding CP1252
 eispy hub disconnect dchub://hub.example.com:411      # leave
 eispy hub ls                                          # list connected hubs (JSON)
 eispy hub users dchub://hub.example.com:411           # list users on a hub
+```
+
+#### Hub aliases (`eispy hub alias`)
+
+Instead of typing a full hub URL every time, give hubs short names.
+Aliases are stored in `~/.config/eispy/hubs.json` (override with
+`EISPY_HUBS_FILE`) and support all four DC URL schemes:
+`dchub://`, `nmdcs://` (NMDC + TLS), `adc://`, `adcs://` (ADC + TLS).
+
+```bash
+eispy hub alias add winter nmdcs://wintermute.example.net:411   # create/update
+eispy hub alias add myhub dchub://myhub.example.com:411
+eispy hub alias ls                                              # list aliases
+eispy hub alias rm winter                                       # remove
+```
+
+Once defined, use the alias **anywhere a hub URL is expected** — it is
+resolved automatically (anything containing `://` is passed through as a
+literal URL):
+
+```bash
+eispy hub connect winter
+eispy hub users winter
+eispy chat send winter "Hello!"
+eispy search query "ubuntu iso" --hub winter
+eispy up --hub winter --hub myhub
 ```
 
 #### Chat (`eispy chat`)
