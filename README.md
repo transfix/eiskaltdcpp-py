@@ -189,6 +189,19 @@ The same API is available on `AsyncDCClient`, which additionally provides
 `await client.wait_pb_message(cmd=..., from_nick=..., timeout=...)` for
 awaiting a specific inbound protobuf message.
 
+> **Scope — low-level transport only.** This package currently exposes only
+> the raw envelope primitives above (`$PB` / `$PBR` broadcast and routing plus
+> the `pb_message` event). Protobuf message types are **not** yet generated for
+> Python, and there are **no** high-level helpers for the E2E-encrypted PM,
+> hub-relay, media-share, or channel extensions — you must build and parse
+> `PbEnvelope` payloads yourself.
+>
+> A ready-made **high-level NMDCpb client** (ergonomic E2EPM, hub-relayed
+> transfers, media sharing, and channels, with importable protobuf types) is
+> available today in the companion **[verlihub-py](https://pypi.org/project/verlihub-py/)**
+> package as `verlihub.client.nmdcpb.NMDCpbClient`. High-level wrappers for
+> eiskaltdcpp-py are planned.
+
 ### Event types
 
 | Event | Arguments |
