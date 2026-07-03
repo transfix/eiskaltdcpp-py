@@ -211,8 +211,12 @@ else()
 endif()
 
 # Install the SWIG module
+# NOTE: a Python extension is a MODULE library on Unix (-> LIBRARY) but a DLL
+# on Windows (-> RUNTIME). Both destinations must be given or the .pyd is
+# silently omitted from the Windows wheel ("cannot import name '_dc_core'").
 install(TARGETS dc_core
     LIBRARY DESTINATION ${_PY_INSTALL_DIR}
+    RUNTIME DESTINATION ${_PY_INSTALL_DIR}
     COMPONENT PythonModule
 )
 
