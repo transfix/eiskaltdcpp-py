@@ -505,6 +505,84 @@ class AsyncDCClient:
                 "hash_progress", current_file, files_left, bytes_left
             )
 
+        # NMDCpb channel events
+        @self._sync_client.on("channel_list_updated")
+        def _on_ch_list(hub_url):
+            self._dispatch_event("channel_list_updated", hub_url)
+
+        @self._sync_client.on("channel_created")
+        def _on_ch_created(hub_url, channel_id, owner_nick, is_private):
+            self._dispatch_event(
+                "channel_created", hub_url, channel_id, owner_nick, is_private
+            )
+
+        @self._sync_client.on("channel_member_update")
+        def _on_ch_member(hub_url, channel_id, nick, update_type, role, reason):
+            self._dispatch_event(
+                "channel_member_update", hub_url, channel_id, nick,
+                update_type, role, reason,
+            )
+
+        @self._sync_client.on("channel_message")
+        def _on_ch_msg(hub_url, channel_id, from_nick, text, is_action, ts):
+            self._dispatch_event(
+                "channel_message", hub_url, channel_id, from_nick, text,
+                is_action, ts,
+            )
+
+        @self._sync_client.on("channel_invite")
+        def _on_ch_invite(hub_url, channel_id, target_nick, inviter_nick):
+            self._dispatch_event(
+                "channel_invite", hub_url, channel_id, target_nick,
+                inviter_nick,
+            )
+
+        @self._sync_client.on("channel_message_undecryptable")
+        def _on_ch_undec(hub_url, channel_id, from_nick, key_id):
+            self._dispatch_event(
+                "channel_message_undecryptable", hub_url, channel_id,
+                from_nick, key_id,
+            )
+
+        @self._sync_client.on("sender_key_rotation")
+        def _on_key_rot(hub_url, channel_id, reason, trigger_nick):
+            self._dispatch_event(
+                "sender_key_rotation", hub_url, channel_id, reason,
+                trigger_nick,
+            )
+
+        # NMDCpb call events
+        @self._sync_client.on("call_offer")
+        def _on_call_offer(hub_url, call_id, from_nick, is_group, media_csv):
+            self._dispatch_event(
+                "call_offer", hub_url, call_id, from_nick, is_group, media_csv
+            )
+
+        @self._sync_client.on("call_answer")
+        def _on_call_answer(hub_url, call_id, from_nick, accepted, reason):
+            self._dispatch_event(
+                "call_answer", hub_url, call_id, from_nick, accepted, reason
+            )
+
+        @self._sync_client.on("call_candidate")
+        def _on_call_cand(hub_url, call_id, from_nick, candidate):
+            self._dispatch_event(
+                "call_candidate", hub_url, call_id, from_nick, candidate
+            )
+
+        @self._sync_client.on("call_end")
+        def _on_call_end(hub_url, call_id, reason, duration_sec):
+            self._dispatch_event(
+                "call_end", hub_url, call_id, reason, duration_sec
+            )
+
+        @self._sync_client.on("call_media_control")
+        def _on_call_media(hub_url, call_id, from_nick, a_muted, v_muted, ss):
+            self._dispatch_event(
+                "call_media_control", hub_url, call_id, from_nick,
+                a_muted, v_muted, ss,
+            )
+
     # ------------------------------------------------------------------
     # Hub connections (async)
     # ------------------------------------------------------------------
@@ -711,6 +789,180 @@ class AsyncDCClient:
     ) -> list[str]:
         """Get recent chat history."""
         return self._sync_client.get_chat_history(hub_url, max_lines)
+
+    # ------------------------------------------------------------------
+    # NMDCpb channels (async)
+    # ------------------------------------------------------------------
+
+    def channel_list(self, hub_url: str) -> bool:
+        """Request the hub's channel list (fires 'channel_list_updated')."""
+        return self._sync_client.channel_list(hub_url)
+
+    def channel_create(
+        self,
+        hub_url: str,
+        channel_id: str,
+        name: str = "",
+        topic: str = "",
+        private: bool = False,
+    ) -> bool:
+        """Create a channel. ``private`` enables sender-key group encryption."""
+        return self._sync_client.channel_create(
+            hub_url, channel_id, name, topic, private
+        )
+
+    def channel_delete(self, hub_url: str, channel_id: str) -> bool:
+        """Delete a channel (owner/admin only, enforced by the hub)."""
+        return self._sync_client.channel_delete(hub_url, channel_id)
+
+    def channel_join(self, hub_url: str, channel_id: str) -> bool:
+        """Join a channel."""
+        return self._sync_client.channel_join(hub_url, channel_id)
+
+    def channel_leave(self, hub_url: str, channel_id: str) -> bool:
+        """Leave a channel."""
+        return self._sync_client.channel_leave(hub_url, channel_id)
+
+    def channel_set_topic(
+        self, hub_url: str, channel_id: str, topic: str
+    ) -> bool:
+        """Set a channel topic."""
+        return self._sync_client.channel_set_topic(hub_url, channel_id, topic)
+
+    def channel_kick(
+        self, hub_url: str, channel_id: str, nick: str, reason: str = ""
+    ) -> bool:
+        """Kick a member from a channel."""
+        return self._sync_client.channel_kick(
+            hub_url, channel_id, nick, reason
+        )
+
+    def channel_set_role(
+        self, hub_url: str, channel_id: str, nick: str, role: int
+    ) -> bool:
+        """Change a member's role (0=member,1=admin,2=owner,3=readonly)."""
+        return self._sync_client.channel_set_role(
+            hub_url, channel_id, nick, role
+        )
+
+    def channel_invite(
+        self, hub_url: str, channel_id: str, target_nick: str
+    ) -> bool:
+        """Invite a user to a (private) channel."""
+        return self._sync_client.channel_invite(
+            hub_url, channel_id, target_nick
+        )
+
+    def channel_send_message(
+        self,
+        hub_url: str,
+        channel_id: str,
+        text: str,
+        is_action: bool = False,
+    ) -> bool:
+        """Send an encrypted message to a private channel."""
+        return self._sync_client.channel_send_message(
+            hub_url, channel_id, text, is_action
+        )
+
+    def channel_generate_sender_key(
+        self, hub_url: str, channel_id: str
+    ) -> Any:
+        """Generate a fresh sender key for a private channel.
+
+        Returns a ``SenderKeyPy`` (``keyHex``, ``keyId``, ``generation``).
+        """
+        return self._sync_client.channel_generate_sender_key(
+            hub_url, channel_id
+        )
+
+    def channel_add_peer_sender_key(
+        self,
+        hub_url: str,
+        channel_id: str,
+        nick: str,
+        key_id: int,
+        key_hex: str,
+    ) -> bool:
+        """Register a peer's distributed sender key (64-char hex)."""
+        return self._sync_client.channel_add_peer_sender_key(
+            hub_url, channel_id, nick, key_id, key_hex
+        )
+
+    def channel_has_sender_key(self, hub_url: str, channel_id: str) -> bool:
+        """Whether we currently hold an outgoing sender key for a channel."""
+        return self._sync_client.channel_has_sender_key(hub_url, channel_id)
+
+    def get_channels(self, hub_url: str) -> list:
+        """Snapshot of all known channels for a hub (list of ChannelInfoPy)."""
+        return self._sync_client.get_channels(hub_url)
+
+    def is_joined_channel(self, hub_url: str, channel_id: str) -> bool:
+        """Whether we have joined a given channel."""
+        return self._sync_client.is_joined_channel(hub_url, channel_id)
+
+    # ------------------------------------------------------------------
+    # NMDCpb calls (async)
+    # ------------------------------------------------------------------
+
+    def call_offer(
+        self,
+        hub_url: str,
+        target_nick: str,
+        media: Optional[list] = None,
+        is_group: bool = False,
+        group_id: str = "",
+    ) -> str:
+        """Start a call. ``media`` is a list of ints (0=audio,1=video,2=screen).
+
+        Returns the new call_id (empty string on failure).
+        """
+        return self._sync_client.call_offer(
+            hub_url, target_nick, media, is_group, group_id
+        )
+
+    def call_answer(
+        self,
+        hub_url: str,
+        call_id: str,
+        accepted: bool = True,
+        reject_reason: str = "",
+    ) -> bool:
+        """Answer an incoming call. ``accepted=False`` rejects with a reason."""
+        return self._sync_client.call_answer(
+            hub_url, call_id, accepted, reject_reason
+        )
+
+    def call_candidate(
+        self, hub_url: str, call_id: str, candidate: str
+    ) -> bool:
+        """Send a connectivity candidate for an in-progress call."""
+        return self._sync_client.call_candidate(hub_url, call_id, candidate)
+
+    def call_end(self, hub_url: str, call_id: str, reason: int = 0) -> bool:
+        """End a call. reason: 0=normal,1=timeout,2=error,3=rejected,4=busy."""
+        return self._sync_client.call_end(hub_url, call_id, reason)
+
+    def call_media_control(
+        self,
+        hub_url: str,
+        call_id: str,
+        audio_muted: bool = False,
+        video_muted: bool = False,
+        screen_sharing: bool = False,
+    ) -> bool:
+        """Update our in-call media state."""
+        return self._sync_client.call_media_control(
+            hub_url, call_id, audio_muted, video_muted, screen_sharing
+        )
+
+    def get_calls(self, hub_url: str) -> list:
+        """Snapshot of all known calls for a hub (list of CallInfoPy)."""
+        return self._sync_client.get_calls(hub_url)
+
+    def get_active_calls(self, hub_url: str) -> list:
+        """Snapshot of only the active calls for a hub (list of CallInfoPy)."""
+        return self._sync_client.get_active_calls(hub_url)
 
     # ------------------------------------------------------------------
     # Users

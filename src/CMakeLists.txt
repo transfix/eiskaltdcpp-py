@@ -79,3 +79,12 @@ endif()
 if(EISKALTDCPP_HAS_DHT)
     target_compile_definitions(eiskaltdcpp_py_bridge PUBLIC WITH_DHT)
 endif()
+
+# WITH_NMDCPB adds relay/media/channel/call manager members to NmdcHub and
+# gates the getChannelManager()/getCallManager() accessors.  The bridge must
+# compile with the same define so the NmdcHub layout matches the library.
+# The protobuf include dirs, generated proto dir, and protobuf library are
+# exported PUBLIC by the dcpp target, so they propagate here via the link.
+if(EISKALTDCPP_HAS_NMDCPB)
+    target_compile_definitions(eiskaltdcpp_py_bridge PUBLIC WITH_NMDCPB)
+endif()

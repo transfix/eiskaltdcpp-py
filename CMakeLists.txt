@@ -161,9 +161,22 @@ if(EISKALTDCPP_INCLUDE_DIR AND EISKALTDCPP_LIBRARY)
         else()
             set(EISKALTDCPP_HAS_DHT FALSE)
         endif()
+
+        # WITH_NMDCPB adds relay/media/channel/call manager members to NmdcHub,
+        # changing its class layout, and is required to reach the per-hub
+        # getChannelManager()/getCallManager() accessors.  Detect via the
+        # generated protobuf header shipped alongside the SDK headers.
+        if(EXISTS "${EISKALTDCPP_INCLUDE_DIR}/proto/nmdcpb.pb.h"
+           OR EXISTS "${EISKALTDCPP_INCLUDE_DIR}/dcpp/ChannelManager.h")
+            message(STATUS "System libeiskaltdcpp has NMDCpb support — enabling WITH_NMDCPB for ABI compat")
+            set(EISKALTDCPP_HAS_NMDCPB TRUE)
+        else()
+            set(EISKALTDCPP_HAS_NMDCPB FALSE)
+        endif()
     else()
         set(EISKALTDCPP_HAS_LUA FALSE)
         set(EISKALTDCPP_HAS_DHT FALSE)
+        set(EISKALTDCPP_HAS_NMDCPB FALSE)
     endif()
 endif()
 
@@ -172,8 +185,9 @@ if(NOT EISKALTDCPP_FOUND)
 
     FetchContent_Declare(eiskaltdcpp
         GIT_REPOSITORY https://github.com/transfix/eiskaltdcpp.git
-        # Pinned to the v2.6.0 release tag (full SHA for reproducible clones)
-        GIT_TAG        e3e4a9f37a191b1b11c1c621ba61b17e6bf982e9
+        # Pinned to the nmdcpb-channels-calls branch tip (full SHA for
+        # reproducible clones): adds client-side ChannelManager + CallManager.
+        GIT_TAG        7468066d6c91a789575f9d1a6ba4fe91269ab553
     )
 
     # Disable everything except the core library
@@ -245,6 +259,18 @@ if(NOT EISKALTDCPP_FOUND)
         set(EISKALTDCPP_HAS_DHT TRUE)
     else()
         set(EISKALTDCPP_HAS_DHT FALSE)
+    endif()
+
+    # WITH_NMDCPB changes NmdcHub class layout (adds relay/media/channel/call
+    # manager members) and gates the getChannelManager()/getCallManager()
+    # accessors.  It defaults ON in eiskaltdcpp; the dcpp target PUBLICLY
+    # exports the protobuf include dirs + generated proto dir and links
+    # protobuf, so the bridge only needs the matching compile definition.
+    if(WITH_NMDCPB OR NOT DEFINED WITH_NMDCPB)
+        message(STATUS "FetchContent eiskaltdcpp built with NMDCpb — enabling WITH_NMDCPB for bridge ABI")
+        set(EISKALTDCPP_HAS_NMDCPB TRUE)
+    else()
+        set(EISKALTDCPP_HAS_NMDCPB FALSE)
     endif()
 
     set(EISKALTDCPP_FOUND TRUE)

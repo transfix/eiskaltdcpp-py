@@ -162,6 +162,95 @@ public:
                                 const std::string& data) {}
 
     // =====================================================================
+    // NMDCpb Channels
+    // =====================================================================
+
+    /// The channel list was refreshed. Call get_channels(hub_url) to read it.
+    virtual void onChannelListUpdated(const std::string& hubUrl) {}
+
+    /// A channel was created (we are auto-joined as owner if we created it).
+    virtual void onChannelCreated(const std::string& hubUrl,
+                                  const std::string& channelId,
+                                  const std::string& ownerNick,
+                                  bool isPrivate) {}
+
+    /// A channel membership change (join/leave/kick/role-change).
+    /// @param updateType 0=joined,1=left,2=kicked,3=role-changed
+    /// @param role       New role: 0=member,1=admin,2=owner,3=readonly
+    virtual void onChannelMemberUpdate(const std::string& hubUrl,
+                                       const std::string& channelId,
+                                       const std::string& nick,
+                                       int updateType,
+                                       int role,
+                                       const std::string& reason) {}
+
+    /// A decrypted channel message arrived.
+    virtual void onChannelMessage(const std::string& hubUrl,
+                                  const std::string& channelId,
+                                  const std::string& fromNick,
+                                  const std::string& text,
+                                  bool isAction,
+                                  uint64_t timestamp) {}
+
+    /// We were invited to a channel.
+    virtual void onChannelInvite(const std::string& hubUrl,
+                                 const std::string& channelId,
+                                 const std::string& targetNick,
+                                 const std::string& inviterNick) {}
+
+    /// A channel message could not be decrypted (missing/invalid sender key).
+    virtual void onChannelMessageUndecryptable(const std::string& hubUrl,
+                                               const std::string& channelId,
+                                               const std::string& fromNick,
+                                               uint32_t keyId) {}
+
+    /// A private channel's sender key must be rotated (member left/kicked).
+    virtual void onSenderKeyRotation(const std::string& hubUrl,
+                                     const std::string& channelId,
+                                     const std::string& reason,
+                                     const std::string& triggerNick) {}
+
+    // =====================================================================
+    // NMDCpb Calls (voice/video signaling)
+    // =====================================================================
+
+    /// An incoming call offer arrived (the call is now ringing).
+    /// @param mediaCsv comma-separated media ints (0=audio,1=video,2=screen)
+    virtual void onCallOffer(const std::string& hubUrl,
+                             const std::string& callId,
+                             const std::string& fromNick,
+                             bool isGroup,
+                             const std::string& mediaCsv) {}
+
+    /// The peer answered our offer (accepted → active; else the call ends).
+    virtual void onCallAnswer(const std::string& hubUrl,
+                              const std::string& callId,
+                              const std::string& fromNick,
+                              bool accepted,
+                              const std::string& rejectReason) {}
+
+    /// A connectivity candidate arrived for a call.
+    virtual void onCallCandidate(const std::string& hubUrl,
+                                 const std::string& callId,
+                                 const std::string& fromNick,
+                                 const std::string& candidate) {}
+
+    /// A call ended.
+    /// @param reason 0=normal,1=timeout,2=error,3=rejected,4=busy
+    virtual void onCallEnd(const std::string& hubUrl,
+                           const std::string& callId,
+                           int reason,
+                           uint32_t durationSec) {}
+
+    /// A peer changed their in-call media state (mute/unmute/screen-share).
+    virtual void onCallMediaControl(const std::string& hubUrl,
+                                    const std::string& callId,
+                                    const std::string& fromNick,
+                                    bool audioMuted,
+                                    bool videoMuted,
+                                    bool screenSharing) {}
+
+    // =====================================================================
     // Queue events
     // =====================================================================
 

@@ -89,6 +89,10 @@ namespace std {
     %template(ShareDirVector)       vector<eiskaltdcpp_py::ShareDirInfo>;
     %template(FileListEntryVector)  vector<eiskaltdcpp_py::FileListEntry>;
     %template(TransferInfoVector)   vector<eiskaltdcpp_py::TransferInfo>;
+    %template(IntVector)            vector<int>;
+    %template(ChannelMemberVector)  vector<eiskaltdcpp_py::ChannelMemberInfo>;
+    %template(ChannelInfoVector)    vector<eiskaltdcpp_py::ChannelInfoPy>;
+    %template(CallInfoVector)       vector<eiskaltdcpp_py::CallInfoPy>;
 }
 
 // ============================================================================

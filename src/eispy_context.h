@@ -39,6 +39,7 @@ class Client;
 class DCContext;
 class SearchResult;
 class DirectoryListing;
+class NmdcHub;
 }
 
 // Forward declare the listener multiplexer (defined in bridge_listeners.h)
@@ -195,6 +196,84 @@ public:
     bool hubSupportsNmdcPb(const std::string& hubUrl);
 
     // =====================================================================
+    // NMDCpb Channels (client-side ChannelManager, per hub)
+    // =====================================================================
+
+    /// Request the hub's channel list (fires onChannelListUpdated).
+    bool channelList(const std::string& hubUrl);
+    /// Create a channel. isPrivate → sender-key group encryption.
+    bool channelCreate(const std::string& hubUrl, const std::string& channelId,
+                       const std::string& name, const std::string& topic,
+                       bool isPrivate);
+    /// Delete a channel (owner/admin only, enforced by the hub).
+    bool channelDelete(const std::string& hubUrl, const std::string& channelId);
+    /// Join a channel.
+    bool channelJoin(const std::string& hubUrl, const std::string& channelId);
+    /// Leave a channel.
+    bool channelLeave(const std::string& hubUrl, const std::string& channelId);
+    /// Set a channel topic.
+    bool channelSetTopic(const std::string& hubUrl, const std::string& channelId,
+                         const std::string& topic);
+    /// Kick a member from a channel.
+    bool channelKick(const std::string& hubUrl, const std::string& channelId,
+                     const std::string& nick, const std::string& reason);
+    /// Change a member's role (0=member,1=admin,2=owner,3=readonly).
+    bool channelSetRole(const std::string& hubUrl, const std::string& channelId,
+                        const std::string& nick, int role);
+    /// Invite a user to a (private) channel.
+    bool channelInvite(const std::string& hubUrl, const std::string& channelId,
+                       const std::string& targetNick);
+    /// Send an encrypted message to a private channel. Requires a sender key
+    /// (see channelGenerateSenderKey). Returns false if none is set.
+    bool channelSendMessage(const std::string& hubUrl, const std::string& channelId,
+                            const std::string& text, bool isAction);
+
+    /// Generate a fresh sender key for a private channel (become the sender).
+    /// Returns a SenderKeyPy whose keyHex is the 64-char hex of the 32-byte
+    /// key (empty on failure), plus keyId/generation to distribute to peers.
+    SenderKeyPy channelGenerateSenderKey(const std::string& hubUrl,
+                                         const std::string& channelId);
+    /// Register a peer's distributed sender key for decryption. keyHex must be
+    /// the 64-char hex encoding of the peer's 32-byte key.
+    bool channelAddPeerSenderKey(const std::string& hubUrl,
+                                 const std::string& channelId,
+                                 const std::string& nick, uint32_t keyId,
+                                 const std::string& keyHex);
+    /// Whether we currently hold an outgoing sender key for a channel.
+    bool channelHasSenderKey(const std::string& hubUrl, const std::string& channelId);
+
+    /// Snapshot of all known channels for a hub.
+    std::vector<ChannelInfoPy> getChannels(const std::string& hubUrl);
+    /// Whether we have joined a given channel.
+    bool isJoinedChannel(const std::string& hubUrl, const std::string& channelId);
+
+    // =====================================================================
+    // NMDCpb Calls (client-side CallManager, per hub)
+    // =====================================================================
+
+    /// Start a call. media is a list of ints (0=audio,1=video,2=screen-share).
+    /// Returns the new call_id (empty on failure).
+    std::string callOffer(const std::string& hubUrl, const std::string& targetNick,
+                          const std::vector<int>& media, bool isGroup,
+                          const std::string& groupId);
+    /// Answer an incoming call. accepted=false rejects with rejectReason.
+    bool callAnswer(const std::string& hubUrl, const std::string& callId,
+                    bool accepted, const std::string& rejectReason);
+    /// Send a connectivity candidate for an in-progress call.
+    bool callCandidate(const std::string& hubUrl, const std::string& callId,
+                       const std::string& candidate);
+    /// End a call. reason: 0=normal,1=timeout,2=error,3=rejected,4=busy.
+    bool callEnd(const std::string& hubUrl, const std::string& callId, int reason);
+    /// Update our in-call media state.
+    bool callMediaControl(const std::string& hubUrl, const std::string& callId,
+                          bool audioMuted, bool videoMuted, bool screenSharing);
+
+    /// Snapshot of all known calls for a hub.
+    std::vector<CallInfoPy> getCalls(const std::string& hubUrl);
+    /// Snapshot of only the active calls for a hub.
+    std::vector<CallInfoPy> getActiveCalls(const std::string& hubUrl);
+
+    // =====================================================================
     // Users
     // =====================================================================
 
@@ -344,6 +423,9 @@ private:
     // Internal helpers
     HubData* findHub(const std::string& url);
     dcpp::Client* findClient(const std::string& url);
+    /// Find the NmdcHub for a URL (nullptr if not an NMDC hub / not found).
+    /// Locks m_mutex internally; the caller MUST NOT hold m_mutex.
+    dcpp::NmdcHub* findNmdcHub(const std::string& url);
 
     // Shared initialization helpers
     static std::string resolveConfigDir(const std::string& configDir);

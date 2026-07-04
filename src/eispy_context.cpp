@@ -629,6 +629,374 @@ bool DCBridge::hubSupportsNmdcPb(const std::string& hubUrl) {
 }
 
 // =========================================================================
+// NMDCpb Channels & Calls (per-hub ChannelManager / CallManager)
+// =========================================================================
+
+#ifdef WITH_NMDCPB
+
+NmdcHub* DCBridge::findNmdcHub(const std::string& url) {
+    Client* client;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        client = findClient(url);
+        if (!client) return nullptr;
+    }
+    // m_mutex released before touching dcpp
+    return dynamic_cast<NmdcHub*>(client);
+}
+
+// Hex helpers for the Python sender-key boundary (raw bytes don't map cleanly
+// to a Python str via SWIG's std::string typemap, so keys cross as hex).
+static std::string toHex(const uint8_t* data, size_t len) {
+    static const char* digits = "0123456789abcdef";
+    std::string out;
+    out.reserve(len * 2);
+    for (size_t i = 0; i < len; ++i) {
+        out.push_back(digits[data[i] >> 4]);
+        out.push_back(digits[data[i] & 0x0f]);
+    }
+    return out;
+}
+
+// Decode a hex string into `out`. Returns false on odd length / non-hex chars.
+static bool fromHex(const std::string& hex, std::vector<uint8_t>& out) {
+    if (hex.size() % 2 != 0) return false;
+    out.clear();
+    out.reserve(hex.size() / 2);
+    auto nibble = [](char c, int& v) -> bool {
+        if (c >= '0' && c <= '9') { v = c - '0'; return true; }
+        if (c >= 'a' && c <= 'f') { v = c - 'a' + 10; return true; }
+        if (c >= 'A' && c <= 'F') { v = c - 'A' + 10; return true; }
+        return false;
+    };
+    for (size_t i = 0; i < hex.size(); i += 2) {
+        int hi, lo;
+        if (!nibble(hex[i], hi) || !nibble(hex[i + 1], lo)) return false;
+        out.push_back(static_cast<uint8_t>((hi << 4) | lo));
+    }
+    return true;
+}
+
+// ----- Channels -----
+
+bool DCBridge::channelList(const std::string& hubUrl) {
+    if (!m_initialized.load()) return false;
+    auto* hub = findNmdcHub(hubUrl);
+    if (!hub) return false;
+    hub->sendChannelEnvelope(hub->getChannelManager().buildListChannels());
+    return true;
+}
+
+bool DCBridge::channelCreate(const std::string& hubUrl, const std::string& channelId,
+                             const std::string& name, const std::string& topic,
+                             bool isPrivate) {
+    if (!m_initialized.load()) return false;
+    auto* hub = findNmdcHub(hubUrl);
+    if (!hub) return false;
+    hub->sendChannelEnvelope(
+        hub->getChannelManager().buildCreateChannel(channelId, name, topic, isPrivate));
+    return true;
+}
+
+bool DCBridge::channelDelete(const std::string& hubUrl, const std::string& channelId) {
+    if (!m_initialized.load()) return false;
+    auto* hub = findNmdcHub(hubUrl);
+    if (!hub) return false;
+    hub->sendChannelEnvelope(hub->getChannelManager().buildDeleteChannel(channelId));
+    return true;
+}
+
+bool DCBridge::channelJoin(const std::string& hubUrl, const std::string& channelId) {
+    if (!m_initialized.load()) return false;
+    auto* hub = findNmdcHub(hubUrl);
+    if (!hub) return false;
+    hub->sendChannelEnvelope(hub->getChannelManager().buildJoinChannel(channelId));
+    return true;
+}
+
+bool DCBridge::channelLeave(const std::string& hubUrl, const std::string& channelId) {
+    if (!m_initialized.load()) return false;
+    auto* hub = findNmdcHub(hubUrl);
+    if (!hub) return false;
+    hub->sendChannelEnvelope(hub->getChannelManager().buildLeaveChannel(channelId));
+    return true;
+}
+
+bool DCBridge::channelSetTopic(const std::string& hubUrl, const std::string& channelId,
+                               const std::string& topic) {
+    if (!m_initialized.load()) return false;
+    auto* hub = findNmdcHub(hubUrl);
+    if (!hub) return false;
+    hub->sendChannelEnvelope(hub->getChannelManager().buildSetTopic(channelId, topic));
+    return true;
+}
+
+bool DCBridge::channelKick(const std::string& hubUrl, const std::string& channelId,
+                           const std::string& nick, const std::string& /*reason*/) {
+    if (!m_initialized.load()) return false;
+    auto* hub = findNmdcHub(hubUrl);
+    if (!hub) return false;
+    hub->sendChannelEnvelope(hub->getChannelManager().buildKick(channelId, nick));
+    return true;
+}
+
+bool DCBridge::channelSetRole(const std::string& hubUrl, const std::string& channelId,
+                              const std::string& nick, int role) {
+    if (!m_initialized.load()) return false;
+    if (role < 0 || role > 3) return false;
+    auto* hub = findNmdcHub(hubUrl);
+    if (!hub) return false;
+    hub->sendChannelEnvelope(hub->getChannelManager().buildSetRole(
+        channelId, nick, static_cast<ChannelRole>(role)));
+    return true;
+}
+
+bool DCBridge::channelInvite(const std::string& hubUrl, const std::string& channelId,
+                             const std::string& targetNick) {
+    if (!m_initialized.load()) return false;
+    auto* hub = findNmdcHub(hubUrl);
+    if (!hub) return false;
+    hub->sendChannelEnvelope(hub->getChannelManager().buildInvite(channelId, targetNick));
+    return true;
+}
+
+bool DCBridge::channelSendMessage(const std::string& hubUrl, const std::string& channelId,
+                                  const std::string& text, bool isAction) {
+    if (!m_initialized.load()) return false;
+    auto* hub = findNmdcHub(hubUrl);
+    if (!hub) return false;
+    std::string wire =
+        hub->getChannelManager().buildEncryptedChannelMessage(channelId, text, isAction);
+    if (wire.empty()) return false;  // no sender key available
+    hub->sendChannelEnvelope(wire);
+    return true;
+}
+
+SenderKeyPy DCBridge::channelGenerateSenderKey(const std::string& hubUrl,
+                                               const std::string& channelId) {
+    SenderKeyPy result;
+    if (!m_initialized.load()) return result;
+    auto* hub = findNmdcHub(hubUrl);
+    if (!hub) return result;
+    std::vector<uint8_t> key = hub->getChannelManager().generateSenderKey(
+        channelId, result.keyId, result.generation);
+    if (!key.empty()) {
+        result.keyHex = toHex(key.data(), key.size());
+    }
+    return result;
+}
+
+bool DCBridge::channelAddPeerSenderKey(const std::string& hubUrl,
+                                       const std::string& channelId,
+                                       const std::string& nick, uint32_t keyId,
+                                       const std::string& keyHex) {
+    if (!m_initialized.load()) return false;
+    std::vector<uint8_t> key;
+    if (!fromHex(keyHex, key) || key.size() != CHACHA_KEY_SIZE) return false;
+    auto* hub = findNmdcHub(hubUrl);
+    if (!hub) return false;
+    hub->getChannelManager().addPeerSenderKey(channelId, nick, keyId, key.data());
+    return true;
+}
+
+bool DCBridge::channelHasSenderKey(const std::string& hubUrl,
+                                   const std::string& channelId) {
+    if (!m_initialized.load()) return false;
+    auto* hub = findNmdcHub(hubUrl);
+    if (!hub) return false;
+    return hub->getChannelManager().hasSenderKey(channelId);
+}
+
+std::vector<ChannelInfoPy> DCBridge::getChannels(const std::string& hubUrl) {
+    std::vector<ChannelInfoPy> result;
+    if (!m_initialized.load()) return result;
+    auto* hub = findNmdcHub(hubUrl);
+    if (!hub) return result;
+    for (const auto& ch : hub->getChannelManager().getChannels()) {
+        ChannelInfoPy py;
+        py.channelId = ch.channelId;
+        py.name = ch.name;
+        py.topic = ch.topic;
+        py.isPrivate = ch.isPrivate;
+        py.ownerNick = ch.ownerNick;
+        py.createdAt = ch.createdAt;
+        py.memberCount = ch.memberCount;
+        py.joined = ch.joined;
+        for (const auto& [nick, role] : ch.members) {
+            ChannelMemberInfo m;
+            m.nick = nick;
+            m.role = static_cast<int>(role);
+            py.members.push_back(m);
+        }
+        result.push_back(std::move(py));
+    }
+    return result;
+}
+
+bool DCBridge::isJoinedChannel(const std::string& hubUrl, const std::string& channelId) {
+    if (!m_initialized.load()) return false;
+    auto* hub = findNmdcHub(hubUrl);
+    if (!hub) return false;
+    return hub->getChannelManager().isJoined(channelId);
+}
+
+// ----- Calls -----
+
+static std::vector<dcpp::CallMediaType> mediaFromInts(const std::vector<int>& media) {
+    std::vector<dcpp::CallMediaType> out;
+    out.reserve(media.size());
+    for (int m : media) {
+        if (m >= 0 && m <= 2) out.push_back(static_cast<dcpp::CallMediaType>(m));
+    }
+    return out;
+}
+
+static CallInfoPy callInfoToPy(const dcpp::CallInfo& c) {
+    CallInfoPy py;
+    py.callId = c.callId;
+    py.peerNick = c.peerNick;
+    py.isGroup = c.isGroup;
+    py.groupId = c.groupId;
+    for (auto m : c.media) py.media.push_back(static_cast<int>(m));
+    py.state = static_cast<int>(c.state);
+    py.createdAt = static_cast<uint64_t>(c.createdAt);
+    py.answeredAt = static_cast<uint64_t>(c.answeredAt);
+    py.localAudioMuted = c.localMedia.audioMuted;
+    py.localVideoMuted = c.localMedia.videoMuted;
+    py.localScreenSharing = c.localMedia.screenSharing;
+    py.remoteAudioMuted = c.remoteMedia.audioMuted;
+    py.remoteVideoMuted = c.remoteMedia.videoMuted;
+    py.remoteScreenSharing = c.remoteMedia.screenSharing;
+    return py;
+}
+
+std::string DCBridge::callOffer(const std::string& hubUrl, const std::string& targetNick,
+                                const std::vector<int>& media, bool isGroup,
+                                const std::string& groupId) {
+    if (!m_initialized.load()) return std::string();
+    auto* hub = findNmdcHub(hubUrl);
+    if (!hub) return std::string();
+    std::string callId;
+    std::string wire = hub->getCallManager().buildOffer(
+        targetNick, mediaFromInts(media), isGroup, groupId, callId);
+    if (wire.empty()) return std::string();
+    hub->sendCallEnvelope(wire);
+    return callId;
+}
+
+bool DCBridge::callAnswer(const std::string& hubUrl, const std::string& callId,
+                          bool accepted, const std::string& rejectReason) {
+    if (!m_initialized.load()) return false;
+    auto* hub = findNmdcHub(hubUrl);
+    if (!hub) return false;
+    std::string wire = hub->getCallManager().buildAnswer(callId, accepted, rejectReason);
+    if (wire.empty()) return false;
+    hub->sendCallEnvelope(wire);
+    return true;
+}
+
+bool DCBridge::callCandidate(const std::string& hubUrl, const std::string& callId,
+                             const std::string& candidate) {
+    if (!m_initialized.load()) return false;
+    auto* hub = findNmdcHub(hubUrl);
+    if (!hub) return false;
+    std::string wire = hub->getCallManager().buildCandidate(callId, candidate);
+    if (wire.empty()) return false;
+    hub->sendCallEnvelope(wire);
+    return true;
+}
+
+bool DCBridge::callEnd(const std::string& hubUrl, const std::string& callId, int reason) {
+    if (!m_initialized.load()) return false;
+    if (reason < 0 || reason > 4) return false;
+    auto* hub = findNmdcHub(hubUrl);
+    if (!hub) return false;
+    std::string wire =
+        hub->getCallManager().buildEnd(callId, static_cast<CallEndReason>(reason));
+    if (wire.empty()) return false;
+    hub->sendCallEnvelope(wire);
+    return true;
+}
+
+bool DCBridge::callMediaControl(const std::string& hubUrl, const std::string& callId,
+                                bool audioMuted, bool videoMuted, bool screenSharing) {
+    if (!m_initialized.load()) return false;
+    auto* hub = findNmdcHub(hubUrl);
+    if (!hub) return false;
+    std::string wire = hub->getCallManager().buildMediaControl(
+        callId, audioMuted, videoMuted, screenSharing);
+    if (wire.empty()) return false;
+    hub->sendCallEnvelope(wire);
+    return true;
+}
+
+std::vector<CallInfoPy> DCBridge::getCalls(const std::string& hubUrl) {
+    std::vector<CallInfoPy> result;
+    if (!m_initialized.load()) return result;
+    auto* hub = findNmdcHub(hubUrl);
+    if (!hub) return result;
+    for (const auto& c : hub->getCallManager().getCalls()) {
+        result.push_back(callInfoToPy(c));
+    }
+    return result;
+}
+
+std::vector<CallInfoPy> DCBridge::getActiveCalls(const std::string& hubUrl) {
+    std::vector<CallInfoPy> result;
+    if (!m_initialized.load()) return result;
+    auto* hub = findNmdcHub(hubUrl);
+    if (!hub) return result;
+    for (const auto& c : hub->getCallManager().getActiveCalls()) {
+        result.push_back(callInfoToPy(c));
+    }
+    return result;
+}
+
+#else  // !WITH_NMDCPB — stub out so symbols exist without the extension
+
+NmdcHub* DCBridge::findNmdcHub(const std::string&) { return nullptr; }
+bool DCBridge::channelList(const std::string&) { return false; }
+bool DCBridge::channelCreate(const std::string&, const std::string&, const std::string&,
+                             const std::string&, bool) { return false; }
+bool DCBridge::channelDelete(const std::string&, const std::string&) { return false; }
+bool DCBridge::channelJoin(const std::string&, const std::string&) { return false; }
+bool DCBridge::channelLeave(const std::string&, const std::string&) { return false; }
+bool DCBridge::channelSetTopic(const std::string&, const std::string&,
+                               const std::string&) { return false; }
+bool DCBridge::channelKick(const std::string&, const std::string&, const std::string&,
+                           const std::string&) { return false; }
+bool DCBridge::channelSetRole(const std::string&, const std::string&, const std::string&,
+                              int) { return false; }
+bool DCBridge::channelInvite(const std::string&, const std::string&,
+                             const std::string&) { return false; }
+bool DCBridge::channelSendMessage(const std::string&, const std::string&,
+                                  const std::string&, bool) { return false; }
+SenderKeyPy DCBridge::channelGenerateSenderKey(const std::string&, const std::string&) {
+    return SenderKeyPy();
+}
+bool DCBridge::channelAddPeerSenderKey(const std::string&, const std::string&,
+                                       const std::string&, uint32_t,
+                                       const std::string&) { return false; }
+bool DCBridge::channelHasSenderKey(const std::string&, const std::string&) { return false; }
+std::vector<ChannelInfoPy> DCBridge::getChannels(const std::string&) { return {}; }
+bool DCBridge::isJoinedChannel(const std::string&, const std::string&) { return false; }
+std::string DCBridge::callOffer(const std::string&, const std::string&,
+                                const std::vector<int>&, bool, const std::string&) {
+    return std::string();
+}
+bool DCBridge::callAnswer(const std::string&, const std::string&, bool,
+                          const std::string&) { return false; }
+bool DCBridge::callCandidate(const std::string&, const std::string&,
+                             const std::string&) { return false; }
+bool DCBridge::callEnd(const std::string&, const std::string&, int) { return false; }
+bool DCBridge::callMediaControl(const std::string&, const std::string&, bool, bool,
+                                bool) { return false; }
+std::vector<CallInfoPy> DCBridge::getCalls(const std::string&) { return {}; }
+std::vector<CallInfoPy> DCBridge::getActiveCalls(const std::string&) { return {}; }
+
+#endif // WITH_NMDCPB
+
+// =========================================================================
 // Users
 // =========================================================================
 

@@ -74,6 +74,20 @@ EVENT_TYPES = frozenset({
     "hash_progress",
     # NMDCpb protobuf events
     "pb_message",
+    # NMDCpb channel events
+    "channel_list_updated",
+    "channel_created",
+    "channel_member_update",
+    "channel_message",
+    "channel_invite",
+    "channel_message_undecryptable",
+    "sender_key_rotation",
+    # NMDCpb call events
+    "call_offer",
+    "call_answer",
+    "call_candidate",
+    "call_end",
+    "call_media_control",
 })
 
 
@@ -220,6 +234,67 @@ class _CallbackRouter(dc_core.DCClientCallback):
         self, hubUrl: str, cmd: str, nick: str, data: str
     ) -> None:
         self._dispatch("pb_message", hubUrl, cmd, nick, data)
+
+    # NMDCpb channel events
+    def onChannelListUpdated(self, hubUrl: str) -> None:
+        self._dispatch("channel_list_updated", hubUrl)
+
+    def onChannelCreated(self, hubUrl: str, channelId: str, ownerNick: str,
+                         isPrivate: bool) -> None:
+        self._dispatch("channel_created", hubUrl, channelId, ownerNick,
+                       isPrivate)
+
+    def onChannelMemberUpdate(self, hubUrl: str, channelId: str, nick: str,
+                              updateType: int, role: int,
+                              reason: str) -> None:
+        self._dispatch("channel_member_update", hubUrl, channelId, nick,
+                       updateType, role, reason)
+
+    def onChannelMessage(self, hubUrl: str, channelId: str, fromNick: str,
+                         text: str, isAction: bool,
+                         timestamp: int) -> None:
+        self._dispatch("channel_message", hubUrl, channelId, fromNick, text,
+                       isAction, timestamp)
+
+    def onChannelInvite(self, hubUrl: str, channelId: str, targetNick: str,
+                        inviterNick: str) -> None:
+        self._dispatch("channel_invite", hubUrl, channelId, targetNick,
+                       inviterNick)
+
+    def onChannelMessageUndecryptable(self, hubUrl: str, channelId: str,
+                                      fromNick: str, keyId: int) -> None:
+        self._dispatch("channel_message_undecryptable", hubUrl, channelId,
+                       fromNick, keyId)
+
+    def onSenderKeyRotation(self, hubUrl: str, channelId: str, reason: str,
+                            triggerNick: str) -> None:
+        self._dispatch("sender_key_rotation", hubUrl, channelId, reason,
+                       triggerNick)
+
+    # NMDCpb call events
+    def onCallOffer(self, hubUrl: str, callId: str, fromNick: str,
+                    isGroup: bool, mediaCsv: str) -> None:
+        self._dispatch("call_offer", hubUrl, callId, fromNick, isGroup,
+                       mediaCsv)
+
+    def onCallAnswer(self, hubUrl: str, callId: str, fromNick: str,
+                     accepted: bool, rejectReason: str) -> None:
+        self._dispatch("call_answer", hubUrl, callId, fromNick, accepted,
+                       rejectReason)
+
+    def onCallCandidate(self, hubUrl: str, callId: str, fromNick: str,
+                        candidate: str) -> None:
+        self._dispatch("call_candidate", hubUrl, callId, fromNick, candidate)
+
+    def onCallEnd(self, hubUrl: str, callId: str, reason: int,
+                  durationSec: int) -> None:
+        self._dispatch("call_end", hubUrl, callId, reason, durationSec)
+
+    def onCallMediaControl(self, hubUrl: str, callId: str, fromNick: str,
+                           audioMuted: bool, videoMuted: bool,
+                           screenSharing: bool) -> None:
+        self._dispatch("call_media_control", hubUrl, callId, fromNick,
+                       audioMuted, videoMuted, screenSharing)
 
 
 # ============================================================================
@@ -482,6 +557,184 @@ class DCClient:
     ) -> list[str]:
         """Get recent chat history for a hub."""
         return list(self._bridge.getChatHistory(hub_url, max_lines))
+
+    # ------------------------------------------------------------------
+    # NMDCpb channels
+    # ------------------------------------------------------------------
+
+    def channel_list(self, hub_url: str) -> bool:
+        """Request the hub's channel list (fires 'channel_list_updated')."""
+        return self._bridge.channelList(hub_url)
+
+    def channel_create(
+        self,
+        hub_url: str,
+        channel_id: str,
+        name: str = "",
+        topic: str = "",
+        private: bool = False,
+    ) -> bool:
+        """Create a channel. ``private`` enables sender-key group encryption."""
+        return self._bridge.channelCreate(
+            hub_url, channel_id, name, topic, private
+        )
+
+    def channel_delete(self, hub_url: str, channel_id: str) -> bool:
+        """Delete a channel (owner/admin only, enforced by the hub)."""
+        return self._bridge.channelDelete(hub_url, channel_id)
+
+    def channel_join(self, hub_url: str, channel_id: str) -> bool:
+        """Join a channel."""
+        return self._bridge.channelJoin(hub_url, channel_id)
+
+    def channel_leave(self, hub_url: str, channel_id: str) -> bool:
+        """Leave a channel."""
+        return self._bridge.channelLeave(hub_url, channel_id)
+
+    def channel_set_topic(
+        self, hub_url: str, channel_id: str, topic: str
+    ) -> bool:
+        """Set a channel topic."""
+        return self._bridge.channelSetTopic(hub_url, channel_id, topic)
+
+    def channel_kick(
+        self, hub_url: str, channel_id: str, nick: str, reason: str = ""
+    ) -> bool:
+        """Kick a member from a channel."""
+        return self._bridge.channelKick(hub_url, channel_id, nick, reason)
+
+    def channel_set_role(
+        self, hub_url: str, channel_id: str, nick: str, role: int
+    ) -> bool:
+        """Change a member's role (0=member,1=admin,2=owner,3=readonly)."""
+        return self._bridge.channelSetRole(hub_url, channel_id, nick, role)
+
+    def channel_invite(
+        self, hub_url: str, channel_id: str, target_nick: str
+    ) -> bool:
+        """Invite a user to a (private) channel."""
+        return self._bridge.channelInvite(hub_url, channel_id, target_nick)
+
+    def channel_send_message(
+        self,
+        hub_url: str,
+        channel_id: str,
+        text: str,
+        is_action: bool = False,
+    ) -> bool:
+        """Send an encrypted message to a private channel.
+
+        Requires a sender key (see :meth:`channel_generate_sender_key`).
+        Returns False if no sender key is set.
+        """
+        return self._bridge.channelSendMessage(
+            hub_url, channel_id, text, is_action
+        )
+
+    def channel_generate_sender_key(
+        self, hub_url: str, channel_id: str
+    ) -> Any:
+        """Generate a fresh sender key for a private channel.
+
+        Returns a ``SenderKeyPy`` with attributes ``keyHex`` (64-char hex of
+        the 32-byte key, empty on failure), ``keyId`` and ``generation`` to
+        distribute to peers.
+        """
+        return self._bridge.channelGenerateSenderKey(hub_url, channel_id)
+
+    def channel_add_peer_sender_key(
+        self,
+        hub_url: str,
+        channel_id: str,
+        nick: str,
+        key_id: int,
+        key_hex: str,
+    ) -> bool:
+        """Register a peer's distributed sender key for decryption.
+
+        ``key_hex`` must be the 64-char hex encoding of the peer's 32-byte key.
+        """
+        return self._bridge.channelAddPeerSenderKey(
+            hub_url, channel_id, nick, key_id, key_hex
+        )
+
+    def channel_has_sender_key(self, hub_url: str, channel_id: str) -> bool:
+        """Whether we currently hold an outgoing sender key for a channel."""
+        return self._bridge.channelHasSenderKey(hub_url, channel_id)
+
+    def get_channels(self, hub_url: str) -> list:
+        """Snapshot of all known channels for a hub (list of ChannelInfoPy)."""
+        return list(self._bridge.getChannels(hub_url))
+
+    def is_joined_channel(self, hub_url: str, channel_id: str) -> bool:
+        """Whether we have joined a given channel."""
+        return self._bridge.isJoinedChannel(hub_url, channel_id)
+
+    # ------------------------------------------------------------------
+    # NMDCpb calls (voice/video signaling)
+    # ------------------------------------------------------------------
+
+    def call_offer(
+        self,
+        hub_url: str,
+        target_nick: str,
+        media: Optional[list] = None,
+        is_group: bool = False,
+        group_id: str = "",
+    ) -> str:
+        """Start a call. ``media`` is a list of ints (0=audio,1=video,2=screen).
+
+        Returns the new call_id (empty string on failure).
+        """
+        media_vec = dc_core.IntVector()
+        for m in (media if media is not None else [0]):
+            media_vec.append(int(m))
+        return self._bridge.callOffer(
+            hub_url, target_nick, media_vec, is_group, group_id
+        )
+
+    def call_answer(
+        self,
+        hub_url: str,
+        call_id: str,
+        accepted: bool = True,
+        reject_reason: str = "",
+    ) -> bool:
+        """Answer an incoming call. ``accepted=False`` rejects with a reason."""
+        return self._bridge.callAnswer(
+            hub_url, call_id, accepted, reject_reason
+        )
+
+    def call_candidate(
+        self, hub_url: str, call_id: str, candidate: str
+    ) -> bool:
+        """Send a connectivity candidate for an in-progress call."""
+        return self._bridge.callCandidate(hub_url, call_id, candidate)
+
+    def call_end(self, hub_url: str, call_id: str, reason: int = 0) -> bool:
+        """End a call. reason: 0=normal,1=timeout,2=error,3=rejected,4=busy."""
+        return self._bridge.callEnd(hub_url, call_id, reason)
+
+    def call_media_control(
+        self,
+        hub_url: str,
+        call_id: str,
+        audio_muted: bool = False,
+        video_muted: bool = False,
+        screen_sharing: bool = False,
+    ) -> bool:
+        """Update our in-call media state."""
+        return self._bridge.callMediaControl(
+            hub_url, call_id, audio_muted, video_muted, screen_sharing
+        )
+
+    def get_calls(self, hub_url: str) -> list:
+        """Snapshot of all known calls for a hub (list of CallInfoPy)."""
+        return list(self._bridge.getCalls(hub_url))
+
+    def get_active_calls(self, hub_url: str) -> list:
+        """Snapshot of only the active calls for a hub (list of CallInfoPy)."""
+        return list(self._bridge.getActiveCalls(hub_url))
 
     # ------------------------------------------------------------------
     # Users

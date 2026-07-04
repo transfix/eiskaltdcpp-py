@@ -111,4 +111,55 @@ struct TransferStats {
     int uploadCount = 0;
 };
 
+// ===========================================================================
+// NMDCpb Channels / Calls (Python-friendly snapshots)
+// ===========================================================================
+
+/// A member of an NMDCpb channel.
+struct ChannelMemberInfo {
+    std::string nick;
+    int role = 0;               ///< 0=member,1=admin,2=owner,3=readonly
+};
+
+/// Result of generating a private-channel sender key. The key material is
+/// hex-encoded (64 lowercase hex chars for the 32-byte key) so it maps to a
+/// plain Python str; distribute it to channel members over E2EPM.
+struct SenderKeyPy {
+    std::string keyHex;         ///< 64-char hex of the 32-byte key ("" on failure)
+    uint32_t keyId = 0;
+    uint32_t generation = 0;
+};
+
+/// Snapshot of an NMDCpb channel from the client-side registry.
+struct ChannelInfoPy {
+    std::string channelId;
+    std::string name;
+    std::string topic;
+    bool isPrivate = false;
+    std::string ownerNick;
+    uint64_t createdAt = 0;
+    uint32_t memberCount = 0;
+    bool joined = false;
+    std::vector<ChannelMemberInfo> members;
+};
+
+/// Snapshot of an NMDCpb voice/video call from the client-side registry.
+struct CallInfoPy {
+    std::string callId;
+    std::string peerNick;
+    bool isGroup = false;
+    std::string groupId;
+    std::vector<int> media;     ///< 0=audio,1=video,2=screen-share
+    int state = 0;              ///< 0=ringing-out,1=ringing-in,2=active,3=ended
+    uint64_t createdAt = 0;
+    uint64_t answeredAt = 0;
+    bool localAudioMuted = false;
+    bool localVideoMuted = false;
+    bool localScreenSharing = false;
+    bool remoteAudioMuted = false;
+    bool remoteVideoMuted = false;
+    bool remoteScreenSharing = false;
+};
+
 } // namespace eiskaltdcpp_py
+
