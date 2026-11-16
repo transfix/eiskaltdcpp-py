@@ -1,0 +1,86 @@
+name: cvcpkg recipes
+
+# Builds the eiskaltdcpp-py cvcpkg columns (cp311, cp312, cp313) from recipes/ as
+# cvcpkg-publish.yml does, and throws the result away. `cvcpkg pack` builds each one into its
+# prefix, runs recipes/<name>/test.sh on the staged tree (the module imports against the core, a
+# client starts it, a setting round-trips, the core shuts down), checks its globs, relocation and
+# glibc floor, and archives it. Nothing is published or uploaded.
+#
+# ubuntu-22.04 with GCC 12: cvcpkg's linux bundles must start on glibc 2.35, so `cvcpkg pack`
+# refuses one built on a newer glibc (24.04 has 2.39).
+#
+# The eiskaltdcpp core recipe lives in transfix/eiskaltdcpp (recipes/eiskaltdcpp). Until
+# cvcpkg.org has eiskaltdcpp 2.6.1, install-deps builds it from that recipe at
+# EISKALTDCPP_RECIPE_REF, overlaid with --recipes-dir; once cvcpkg.org has it the overlay is
+# unused and can go.
+#
+# GitHub-hosted runners only: this repository is public, and a pull request's workflows must
+# never reach self-hosted runners.
+
+on:
+  pull_request:
+    paths:
+      - 'recipes/**'
+      - '.github/workflows/cvcpkg-recipes.yml'
+      - '.github/actions/setup-cvcpkg/**'
+  push:
+    branches: [master]
+    paths:
+      - 'recipes/**'
+      - '.github/workflows/cvcpkg-recipes.yml'
+      - '.github/actions/setup-cvcpkg/**'
+  workflow_dispatch:
+
+concurrency:
+  group: cvcpkg-recipes-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # transfix/eiskaltdcpp with recipes/eiskaltdcpp at 2.6.1 (transfix/eiskaltdcpp#7).
+  EISKALTDCPP_RECIPE_REF: 54cece3ea20ba1e094a866dfe4d8c8b97a769c20
+  CC: gcc-12
+  CXX: g++-12
+
+jobs:
+  eiskaltdcpp-py:
+    name: eiskaltdcpp-py-${{ matrix.abi }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [cp311, cp312, cp313]
+    steps:
+      - uses: actions/checkout@v4
+      - name: eiskaltdcpp recipe (transfix/eiskaltdcpp)
+        uses: actions/checkout@v4
+        with:
+          repository: transfix/eiskaltdcpp
+          ref: ${{ env.EISKALTDCPP_RECIPE_REF }}
+          path: .eiskaltdcpp-recipe
+          persist-credentials: false
+          sparse-checkout: |
+            recipes/eiskaltdcpp
+      - uses: ./.github/actions/setup-cvcpkg
+      - name: msgfmt (eiskaltdcpp's build compiles its message catalogues)
+        run: command -v msgfmt || { sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends gettext; }
+      # One prefix per column: the columns' build backends occupy the same slots.
+      - name: Dependencies (cvcpkg.org; eiskaltdcpp from its recipe until published)
+        run: |
+          set -euo pipefail
+          "$CXX" --version | head -1
+          cvcpkg install-deps "eiskaltdcpp-py-${{ matrix.abi }}" \
+            --recipes-dir .eiskaltdcpp-recipe/recipes --recipes-dir recipes \
+            --prefix "$RUNNER_TEMP/prefix" --config release --link shared \
+            --fallback-to-source --include-host-tools
+      - name: Build, test and pack
+        run: |
+          set -euo pipefail
+          cvcpkg pack "eiskaltdcpp-py-${{ matrix.abi }}" --local \
+            --recipes-dir .eiskaltdcpp-recipe/recipes --recipes-dir recipes \
+            --prefix "$RUNNER_TEMP/prefix" --config release --link shared --output-dir dist
+          ls -l dist/
+          ls "dist/eiskaltdcpp-py-${{ matrix.abi }}-2.6.0+cvc."*-linux-x86_64-release-shared.tar.gz

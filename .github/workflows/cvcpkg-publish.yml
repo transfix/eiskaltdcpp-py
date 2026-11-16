@@ -1,0 +1,82 @@
+name: cvcpkg publish
+
+# Publish the eiskaltdcpp-py cvcpkg columns (cp311, cp312, cp313) to cvcpkg.org under the cy-pca
+# organisation. Started by hand, on master only: bump upstream_version (cvc_revision for a
+# packaging-only change), merge, then run this.
+#
+# Each column is built as cvcpkg-recipes.yml builds it (ubuntu-22.04 for cvcpkg's glibc 2.35
+# floor, GCC 12), with its recipes/<name>/test.sh run on the staged tree before the pack, and its
+# dependencies taken from cvcpkg.org only: a bundle must never need something the registry cannot
+# give the person installing it. So the columns wait for the eiskaltdcpp version they pin to be
+# on cvcpkg.org (transfix/eiskaltdcpp's cvcpkg-publish.yml publishes it), and build against that
+# published bundle. After publishing, each column is installed from cvcpkg.org into an empty
+# prefix and its test.sh runs again there.
+#
+# The token is the CVCPKG_PUBLISHER_TOKEN repository secret: a cvcpkg.org publisher that is a
+# member of the cy-pca organisation. Only the publish steps see it. Without it a job builds,
+# tests and packs, then fails before publishing anything. Nothing is uploaded as an artifact.
+# cvcpkg publish skips a bundle the registry already has, so a second run is harmless.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: cvcpkg-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CC: gcc-12
+  CXX: g++-12
+
+jobs:
+  eiskaltdcpp-py:
+    name: eiskaltdcpp-py-${{ matrix.abi }}
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [cp311, cp312, cp313]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-cvcpkg
+      - name: Dependencies (cvcpkg.org only)
+        run: |
+          set -euo pipefail
+          cvcpkg info eiskaltdcpp >/dev/null 2>&1 \
+            || { echo "::error::eiskaltdcpp is not on cvcpkg.org yet (transfix/eiskaltdcpp cvcpkg-publish.yml); publishing nothing"; exit 1; }
+          cvcpkg install-deps "eiskaltdcpp-py-${{ matrix.abi }}" --recipes-dir recipes \
+            --prefix "$RUNNER_TEMP/prefix" --config release --link shared \
+            --no-fallback-to-source --include-host-tools
+      - name: Build, test and pack
+        run: |
+          set -euo pipefail
+          cvcpkg pack "eiskaltdcpp-py-${{ matrix.abi }}" --local --recipes-dir recipes \
+            --prefix "$RUNNER_TEMP/prefix" --config release --link shared --output-dir dist
+          ls -l dist/
+          n=$(ls "dist/eiskaltdcpp-py-${{ matrix.abi }}-"*-linux-x86_64-release-shared.tar.gz | wc -l)
+          [ "$n" = 1 ] || { echo "::error::expected one eiskaltdcpp-py-${{ matrix.abi }} bundle, packed $n"; exit 1; }
+      - name: Publish
+        env:
+          CVCPKG_TOKEN: ${{ secrets.CVCPKG_PUBLISHER_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CVCPKG_TOKEN:-}" ]; then
+            echo "::error::no CVCPKG_PUBLISHER_TOKEN secret: the bundle packed but was not published"
+            exit 1
+          fi
+          cvcpkg publish "dist/eiskaltdcpp-py-${{ matrix.abi }}-"*.tar.gz --server https://cvcpkg.org --org cy-pca
+          # The server-side recipe row (the package page, the dependency graph). An upsert.
+          cvcpkg recipe push "eiskaltdcpp-py-${{ matrix.abi }}" --recipes-dir recipes --no-default-recipes \
+            --server https://cvcpkg.org --org cy-pca
+      - name: Install it from cvcpkg.org and test it there
+        run: |
+          set -euo pipefail
+          check="$RUNNER_TEMP/check"
+          cvcpkg install "eiskaltdcpp-py-${{ matrix.abi }}" --prefix "$check" --config release --link shared \
+            --no-fallback-to-source
+          CVC_INSTALL_DIR="$check" CVC_DEPS_PREFIX="$check" bash "recipes/eiskaltdcpp-py-${{ matrix.abi }}/test.sh"
