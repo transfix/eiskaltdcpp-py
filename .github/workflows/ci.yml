@@ -1,6 +1,9 @@
 #
 # CI — build + test on every PR and push to master
 #
+# GitHub-hosted runners only: this repository is public, and a pull request's workflows must
+# never reach self-hosted runners.
+#
 name: CI
 
 on:
@@ -13,6 +16,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     strategy:
@@ -20,12 +26,8 @@ jobs:
       matrix:
         python-version: ["3.10", "3.12"]
         build-type: [Release]
-        runner:
-          - ubuntu-24.04
-          - [self-hosted, linux, x64]
 
-    runs-on: ${{ matrix.runner }}
-    continue-on-error: ${{ !contains(toJSON(matrix.runner), 'ubuntu') }}
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
@@ -86,16 +88,11 @@ jobs:
           VERSION=$(grep 'project.*VERSION' CMakeLists.txt | head -1 | sed 's/.*VERSION *\([^ )]*\).*/\1/')
           SHA=$(git rev-parse --short HEAD)
           ARCH=$(uname -m)
-          if ${{ contains(toJSON(matrix.runner), 'ubuntu') }}; then
-            OS=linux
-          else
-            OS=linux-selfhosted
-          fi
+          OS=linux
           PYVER=$(echo "${{ matrix.python-version }}" | tr -d '.')
           echo "name=eiskaltdcpp-py-${VERSION}~dev-${SHA}-${OS}-${ARCH}-py${PYVER}" >> "$GITHUB_OUTPUT"
 
       - name: Upload build artifact
-        if: contains(toJSON(matrix.runner), 'ubuntu')
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.artifact.outputs.name }}
@@ -291,7 +288,7 @@ jobs:
       - build-and-test
       - build-and-test-windows
       - build-and-test-macos
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     # Network issues with live hubs should not block merging.
