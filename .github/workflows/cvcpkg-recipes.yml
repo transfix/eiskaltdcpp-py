@@ -10,7 +10,7 @@ name: cvcpkg recipes
 # refuses one built on a newer glibc (24.04 has 2.39).
 #
 # The eiskaltdcpp core recipe lives in transfix/eiskaltdcpp (recipes/eiskaltdcpp). Until
-# cvcpkg.org has eiskaltdcpp 2.6.1, install-deps builds it from that recipe at
+# cvcpkg.org has eiskaltdcpp 2.6.2, install-deps builds it from that recipe at
 # EISKALTDCPP_RECIPE_REF, overlaid with --recipes-dir; once cvcpkg.org has it the overlay is
 # unused and can go.
 #
@@ -39,8 +39,8 @@ permissions:
   contents: read
 
 env:
-  # transfix/eiskaltdcpp with recipes/eiskaltdcpp at 2.6.1 (transfix/eiskaltdcpp#7).
-  EISKALTDCPP_RECIPE_REF: 54cece3ea20ba1e094a866dfe4d8c8b97a769c20
+  # transfix/eiskaltdcpp with recipes/eiskaltdcpp at 2.6.2 (transfix/eiskaltdcpp#7).
+  EISKALTDCPP_RECIPE_REF: 3b8e2a297308716dc92899fbf69bcfc7cb62bb71
   CC: gcc-12
   CXX: g++-12
 

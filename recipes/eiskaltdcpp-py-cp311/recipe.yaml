@@ -16,9 +16,9 @@ recipe:
 
 # Upstream source: this repository (transfix/eiskaltdcpp-py), tag v2.6.0 (b7ec07c, 2026-07-03).
 # A recipe cannot pin the commit it is committed in, so it pins the release's commit. The
-# bindings build against cvcpkg's eiskaltdcpp 2.6.1 (transfix/eiskaltdcpp v2.6.1, which only adds
-# the daemon stop fix to the v2.6.0 core this release pins; the library's ABI is unchanged), not
-# a copy of their own. master is the same code plus README changes.
+# bindings build against cvcpkg's eiskaltdcpp 2.6.2 (transfix/eiskaltdcpp v2.6.2: the v2.6.0 core
+# this release pins, plus the daemon stop fix and build fixes; the library's ABI is unchanged), not
+# a copy of their own. master is the same code plus README and CI changes.
 source:
   type: tarball
   url: https://github.com/transfix/eiskaltdcpp-py/archive/b7ec07c96b3ec8136a54d69a16159794f22fdbeb.tar.gz
@@ -44,7 +44,7 @@ depends:
     - name: python311
     # The core library and headers it compiles and links against, the same build.
     - name: eiskaltdcpp
-      version: "==2.6.1"
+      version: "==2.6.2"
     - name: click-cp311
   host_tools:
     - python311
