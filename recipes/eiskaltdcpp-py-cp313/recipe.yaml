@@ -1,0 +1,84 @@
+schema_version: 1
+recipe:
+  name: eiskaltdcpp-py-cp313
+  upstream_version: "2.6.0"
+  cvc_revision: 2
+  maintainer: "cy-pca"
+  maintainer_url: "https://github.com/transfix/eiskaltdcpp-py"
+  homepage: https://github.com/transfix/eiskaltdcpp-py
+  license: GPL-3.0-or-later
+  tags: [python, networking, p2p, direct-connect]
+  description: >-
+    eiskaltdcpp-py 2.6.0 for CPython 3.13 (cp313): the SWIG bindings for libeiskaltdcpp (the
+    transfix fork), importable as `eiskaltdcpp`, with the `eispy` command. Built from source
+    against cvcpkg's eiskaltdcpp, which it loads from the same prefix (no vendored copy of the
+    core). The optional FastAPI server (`eiskaltdcpp-api`, the [api] extra) is not wired up.
+
+# Upstream source: this repository (transfix/eiskaltdcpp-py), tag v2.6.0 (b7ec07c, 2026-07-03).
+# A recipe cannot pin the commit it is committed in, so it pins the release's commit. The
+# bindings build against cvcpkg's eiskaltdcpp 2.6.2 (transfix/eiskaltdcpp v2.6.2: the v2.6.0 core
+# this release pins, plus the daemon stop fix and build fixes; the library's ABI is unchanged), not
+# a copy of their own. master is the same code plus README and CI changes.
+source:
+  type: tarball
+  url: https://github.com/transfix/eiskaltdcpp-py/archive/b7ec07c96b3ec8136a54d69a16159794f22fdbeb.tar.gz
+  sha256: "d516e618bb80c06fb2a1fd389f476fd41cb9bde4c8d310ad406899b6808c90a7"
+  strip_components: 1
+
+python:
+  interpreter: python313
+  abi: cp313
+
+patches: []
+
+depends:
+  build:
+    - cmake
+    - ninja
+    - swig
+    # The PEP 517 backend and what it imports; --no-build-isolation, so they must be here.
+    - name: scikit-build-core-cp313
+    - name: packaging-cp313
+    - name: pathspec-cp313
+  runtime:
+    - name: python313
+    # The core library and headers it compiles and links against, the same build.
+    - name: eiskaltdcpp
+      version: "==2.6.2"
+    - name: click-cp313
+  host_tools:
+    - python313
+    - patchelf
+
+provides:
+  - eiskaltdcpp-py
+
+build:
+  matrix:
+    - platform: linux
+      script: build.sh
+
+package:
+  files:
+    - lib/python3.13/site-packages/eiskaltdcpp/
+    - lib/python3.13/site-packages/eiskaltdcpp_py-2.6.0.0.dist-info/
+    - bin/eispy
+
+test:
+  script: test.sh
+
+abi:
+  cxx_std: 20
+
+notes:
+  - title: "Built against eiskaltdcpp's ABI flags"
+    description: >-
+      eiskaltdcpp's public classes change layout with LUA_SCRIPT, WITH_DHT and WITH_NMDCPB.
+      build.sh reads them from the core's share/eiskaltdcpp/build-flags.txt and compiles the
+      bridge with the same definitions, so the extension and the library agree on every
+      offset. Pin eiskaltdcpp to the version this column was built against.
+  - title: "The [api] extra is not packaged"
+    description: >-
+      eiskaltdcpp-api needs fastapi, uvicorn, pydantic, bcrypt and python-jose; python-jose has
+      no cvcpkg column yet, so the server's dependencies are not declared and bin/eiskaltdcpp-api
+      is removed from the bundle. The `eiskaltdcpp` module and `eispy` work without them.
