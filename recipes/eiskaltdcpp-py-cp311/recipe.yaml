@@ -24,7 +24,7 @@ recipe:
 #
 # patches/0001 is master's eiskaltdcpp-interop commit (transfix/eiskaltdcpp-py#17), limited to what
 # the package ships: python/eiskaltdcpp/interop.py, its entry point, docs/eiskaltdcpp-interop.md,
-# and the SWIG TTHValue typedef the driver needs to queue downloads. The next tag includes it;
+# and the SWIG typedef the driver needs to queue downloads by hash. The next tag includes it;
 # then pin that tag and drop the patch.
 source:
   type: tarball
@@ -37,7 +37,7 @@ python:
   abi: cp311
 
 patches:
-  - patches/0001-eiskaltdcpp-interop-and-tthvalue-typedef.patch
+  - patches/0001-eiskaltdcpp-interop.patch
 
 depends:
   build:
