@@ -1,0 +1,669 @@
+diff --git a/docs/eiskaltdcpp-interop.md b/docs/eiskaltdcpp-interop.md
+new file mode 100644
+index 0000000..0d80edd
+--- /dev/null
++++ b/docs/eiskaltdcpp-interop.md
+@@ -0,0 +1,93 @@
++# eiskaltdcpp-interop
++
++`eiskaltdcpp-interop` runs one headless EiskaltDC++ client and drives it through JSON lines on
++stdin and stdout, so a test can use EiskaltDC++ as a black box: connect it to a hub, chat, list
++users, search and download, and read what it sees.
++
++- **Contract version:** 1 (`eiskaltdcpp-interop --version` prints it).
++- **Client:** EiskaltDC++ 2.6.2 (the transfix fork), the version the `ready` event reports.
++- **Package:** `eiskaltdcpp-py-cp312` on cvcpkg.org (also `-cp311` and `-cp313`), Linux x86_64.
++
++## Install and run
++
++```bash
++cvcpkg install eiskaltdcpp-py-cp312 --prefix P
++P/bin/eiskaltdcpp-interop --nick alice --share /tmp/a-share --download-dir /tmp/a-dl --passive
++```
++
++`P/bin/eiskaltdcpp-interop` runs without activating the prefix. Each prefix holds one Python
++column, so install `-cp311`, `-cp312` or `-cp313` into a prefix of its own.
++
++## Command line
++
++```
++eiskaltdcpp-interop --nick NICK --share DIR --download-dir DIR
++                    [--active --port PORT --ip IP | --passive] [--log FILE]
++```
++
++- It starts its own client with a fresh temporary configuration. It reads nothing from
++  `~/.config` or the rest of the user's home, and deletes the configuration when it exits.
++- It shares `DIR` and hashes it before it reports `ready`.
++- `--active`: it accepts peer connections on `--port` (TCP and UDP) and tells peers to connect
++  to `--ip`. It also listens for encrypted (TLS) peer connections on a second port, a free one
++  picked at start.
++- `--passive` (the default when neither is given): it accepts no peer connections.
++- `--log FILE`: diagnostics go to FILE (appended). Without it they go to stderr. Nothing but
++  contract events is ever written to stdout.
++- It exits with status 0 on `{"op":"quit"}`, on EOF on stdin, or on SIGTERM, within 10 s.
++  Status 1 means start-up failed (an `error` event with `"op":"start"` says why). Status 2
++  means bad arguments.
++
++## Events (stdout)
++
++One JSON object per line, each with `"event"`:
++
++| Event | When |
++|---|---|
++| `{"event":"ready","version":"2.6.2"}` | Once, after start-up, when the share is hashed. Commands are read only after it. |
++| `{"event":"hub","state":"connected","url":URL,"detail":null}` | Logged in to the hub at URL: the hub lists this client's nick. |
++| `{"event":"hub","state":"disconnected","url":URL,"detail":TEXT}` | The connection to a hub it had logged in to was lost. |
++| `{"event":"hub","state":"redirect","url":URL,"detail":NEW_URL}` | The hub redirected it. It follows: it leaves URL and connects to NEW_URL, and later `hub` events carry NEW_URL. Commands act on NEW_URL from then on. |
++| `{"event":"hub","state":"error","url":URL,"detail":TEXT}` | It could not log in: connection refused or failed, TLS keyprint mismatch, nick taken, hub full, or a password was asked for. |
++| `{"event":"users","nicks":[...]}` | The reply to `users`: every nick the hub lists, this client's own included, sorted. |
++| `{"event":"chat","from":NICK,"text":TEXT}` | Each main-chat line received, including this client's own lines as the hub echoes them. `from` is null for a line with no sender. A third-person line (`/me`) has its text prefixed with `/me `. |
++| `{"event":"pm","from":NICK,"text":TEXT}` | Each private message received from another user. |
++| `{"event":"result","name":FILE,"size":N,"tth":TTH_OR_NULL,"from":NICK}` | One per search result: a file's name (no directory), its size in bytes, its TTH (39 base32 characters) or null, and the user who has it. Directory results are not reported. |
++| `{"event":"downloaded","name":FILE,"path":ABS_PATH,"sha256":HEX}` | A queued download finished. `path` is in `--download-dir`. |
++| `{"event":"error","op":OP,"message":TEXT}` | A command failed. `op` is the command's `op`, or `""` for a line that is not a command, or `"start"` for start-up. |
++
++## Commands (stdin)
++
++One JSON object per line, each with `"op"`. Commands run in order. Their effects show up as the
++events above, and a command that fails gives an `error` event.
++
++| Command | Does |
++|---|---|
++| `{"op":"connect","url":URL}` | Connect to a hub. URL is `HOST:PORT` (NMDC, as `127.0.0.1:411`), `dchub://HOST:PORT`, or `nmdcs://HOST:PORT` (NMDC over TLS). For NMDCS, `nmdcs://HOST:PORT/?kp=SHA256/<base32>` pins the hub's keyprint: a different certificate gives a hub `error` with a keyprint mismatch. Without `kp` any certificate is accepted. One hub at a time: a second `connect` leaves the first hub, and gives no event for it. |
++| `{"op":"say","text":TEXT}` | Send a main-chat line. |
++| `{"op":"pm","to":NICK,"text":TEXT}` | Send a private message. An `error` if NICK is not on the hub. |
++| `{"op":"users"}` | Reply with a `users` event. |
++| `{"op":"search","pattern":TEXT}` | Search the hub. Results arrive as `result` events, for as long as peers answer. A new search replaces the previous results. |
++| `{"op":"download","name":FILE,"from":NICK}` | Queue the file named FILE from NICK, from the latest search's results, by its TTH. A `downloaded` event follows when it finishes. An `error` if no result has that name from that user, or if the result has no TTH. |
++| `{"op":"quit"}` | Leave the hub, shut down, exit 0. |
++
++`say`, `pm`, `users`, `search` and `download` need a logged-in hub: before the `hub` event with
++`"state":"connected"` they give an `error`.
++
++## Limits
++
++- One hub at a time.
++- Downloads go by TTH. A result without one cannot be downloaded (NMDC clients normally send a
++  TTH for every file).
++- A download that fails is retried by the client; there is no event for a failure. Give up after
++  a timeout of your choosing.
++- No hub passwords: a hub that asks for one gives a hub `error`.
++- Start-up waits up to 300 s for hashing. Files whose names start with `.` are not shared.
++- Linux x86_64 only.
++
++## Tested
++
++`tests/interop/check_interop.py` in transfix/eiskaltdcpp-py runs two drivers (one active, one
++passive) against an NMDC hub, over NMDC and over NMDCS with a pinned keyprint. It checks login,
++`users`, main chat, PMs, search, downloads both ways with matching SHA-256, `error` events, a
++wrong keyprint being refused, and exit 0 within 10 s on `quit` and on EOF.
+diff --git a/pyproject.toml b/pyproject.toml
+index b5eeb5b..593d5c9 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -66,6 +66,7 @@ dev = [
+ 
+ [project.scripts]
+ eispy = "eiskaltdcpp.cli:main"
++eiskaltdcpp-interop = "eiskaltdcpp.interop:main"
+ eiskaltdcpp-api = "eiskaltdcpp.api.__main__:main"
+ 
+ [project.urls]
+diff --git a/python/eiskaltdcpp/interop.py b/python/eiskaltdcpp/interop.py
+new file mode 100644
+index 0000000..9dbeee6
+--- /dev/null
++++ b/python/eiskaltdcpp/interop.py
+@@ -0,0 +1,534 @@
++"""eiskaltdcpp-interop: one headless EiskaltDC++ client behind a JSON-lines contract.
++
++    eiskaltdcpp-interop --nick NICK --share DIR --download-dir DIR
++                        [--active --port PORT --ip IP | --passive] [--log FILE]
++
++It starts the core with a fresh temporary configuration (nothing from ~/.config), shares DIR,
++waits for it to be hashed, prints ``{"event":"ready",...}`` and then reads one JSON command per
++line on stdin and prints one JSON event per line on stdout. ``{"op":"quit"}`` or EOF shuts it
++down and it exits 0. The contract is docs/eiskaltdcpp-interop.md (in the cvcpkg packages,
++share/doc/eiskaltdcpp-py-cp3XX/eiskaltdcpp-interop.md).
++"""
++
++from __future__ import annotations
++
++import argparse
++import hashlib
++import io
++import json
++import os
++import shutil
++import signal
++import socket
++import sys
++import tempfile
++import threading
++import time
++from pathlib import Path
++
++CONTRACT_VERSION = "1"
++
++# A search result without a TTH carries the zero hash.
++_ZERO_TTH = "A" * 39
++
++# How long start-up may take to hash the share before it gives up.
++_HASH_TIMEOUT = 300.0
++# Shutdown budget: the contract promises an exit within 10 s.
++_SHUTDOWN_BUDGET = 7.0
++
++
++class Driver:
++    def __init__(self, args: argparse.Namespace, out: io.TextIOBase, log: io.TextIOBase) -> None:
++        self.args = args
++        self.out = out
++        self.log = log
++        self._out_lock = threading.Lock()
++        self._state_lock = threading.Lock()
++        self.client = None
++        self.cfg_dir = ""
++        self.nick = args.nick
++        self.hub_url = ""          # the hub the commands act on
++        self._logged_in: set[str] = set()   # hub URLs where our own nick has appeared
++        self._closing = False
++        self._results: list[dict] = []
++        self._results_lock = threading.Lock()
++        self._pending: dict[str, str] = {}  # queue target -> name
++
++    # -- output ------------------------------------------------------------
++
++    def emit(self, obj: dict) -> None:
++        line = json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
++        with self._out_lock:
++            try:
++                self.out.write(line + "\n")
++                self.out.flush()
++            except (BrokenPipeError, ValueError):
++                pass
++
++    def note(self, msg: str) -> None:
++        try:
++            self.log.write(f"[eiskaltdcpp-interop] {msg}\n")
++            self.log.flush()
++        except (ValueError, OSError):
++            pass
++
++    def error(self, op: str, message: str) -> None:
++        self.emit({"event": "error", "op": op, "message": message})
++
++    # -- start-up ----------------------------------------------------------
++
++    def start(self) -> bool:
++        from eiskaltdcpp import DCClient
++
++        a = self.args
++        self.cfg_dir = tempfile.mkdtemp(prefix="eiskaltdcpp-interop-")
++        # The core reads nothing from the user's home: its paths are this directory, and HOME
++        # points there too in case anything else looks.
++        home = os.path.join(self.cfg_dir, "home")
++        os.makedirs(home)
++        os.environ["HOME"] = home
++        os.environ["XDG_CONFIG_HOME"] = os.path.join(home, ".config")
++        os.environ["XDG_DATA_HOME"] = os.path.join(home, ".local", "share")
++
++        self.client = c = DCClient(os.path.join(self.cfg_dir, "config") + "/")
++        if not c.initialize():
++            self.error("start", "the client core did not initialize")
++            return False
++
++        share = os.path.abspath(a.share)
++        dl = os.path.abspath(a.download_dir)
++        os.makedirs(dl, exist_ok=True)
++
++        settings = {
++            "Nick": a.nick,
++            "Description": "eiskaltdcpp-interop",
++            "DownloadDirectory": dl + "/",
++            "TempDownloadDirectory": os.path.join(self.cfg_dir, "incomplete") + "/",
++            "HashingStartDelay": "0",
++            "AUTO_DETECT_CONNECTION": "0",
++            "SLOTS": "4",
++            "USE_DHT": "0",
++            "AUTO_SEARCH": "0",
++            "AUTO_FOLLOW": "0",
++            "COMPRESS_TRANSFERS": "0",
++        }
++        if a.active:
++            settings.update({
++                "INCOMING_CONNECTIONS": "0",      # active (direct)
++                "TCP_PORT": str(a.port),
++                "UDP_PORT": str(a.port),
++                "TLS_PORT": str(_free_port()),
++                "EXTERNAL_IP": a.ip,
++                "NO_IP_OVERRIDE": "1",
++            })
++        else:
++            settings["INCOMING_CONNECTIONS"] = "3"  # passive
++        for k, v in settings.items():
++            c.set_setting(k, v)
++
++        self._wire()
++        c.start_networking()
++
++        if not c.add_share(share + "/", os.path.basename(share.rstrip("/")) or "share"):
++            self.error("start", f"cannot share {share}")
++            return False
++        if not self._hash_share(share):
++            return False
++        self.emit({"event": "ready", "version": _core_version()})
++        return True
++
++    def _hash_share(self, share: str) -> bool:
++        c = self.client
++        expected = _share_bytes(share)
++        deadline = time.monotonic() + _HASH_TIMEOUT
++        c.refresh_share()
++        try:
++            c.pause_hashing(False)
++        except Exception:
++            pass
++        while time.monotonic() < deadline:
++            time.sleep(0.5)
++            hs = c.hash_status
++            if hs.get("files_left", 0) == 0 and c.share_size >= expected:
++                return True
++            if hs.get("files_left", 0) == 0:
++                # Newly hashed files enter the share on the next refresh.
++                c.refresh_share()
++        self.error("start", f"hashing {share} did not finish in {_HASH_TIMEOUT:.0f} s "
++                            f"(shared {c.share_size} of {expected} bytes)")
++        return False
++
++    # -- events from the core ------------------------------------------------
++
++    def _wire(self) -> None:
++        on = self.client.on
++        on("hub_connected", self._on_socket_connected)
++        on("hub_disconnected", self._on_hub_failed)
++        on("hub_redirect", self._on_redirect)
++        on("hub_nick_taken", lambda url: self._hub_error(url, "nick taken"))
++        on("hub_full", lambda url: self._hub_error(url, "hub full"))
++        on("hub_get_password", lambda url: self._hub_error(url, "password required"))
++        on("user_connected", self._on_user)
++        on("user_updated", self._on_user)
++        on("chat_message", self._on_chat)
++        on("private_message", self._on_pm)
++        on("status_message", lambda url, msg: self.note(f"status {url}: {msg}"))
++        on("search_result", self._on_result)
++        on("queue_item_finished", self._on_finished)
++        on("download_failed", lambda t, r: self.note(f"download failed {t}: {r}"))
++
++    def _on_socket_connected(self, url: str, name: str) -> None:
++        self.note(f"socket connected to {url} ({name})")
++
++    def _on_user(self, url: str, nick: str) -> None:
++        if nick != self.nick:
++            return
++        with self._state_lock:
++            if url in self._logged_in:
++                return
++            self._logged_in.add(url)
++        self.emit({"event": "hub", "state": "connected", "url": url, "detail": None})
++
++    def _on_hub_failed(self, url: str, reason: str) -> None:
++        with self._state_lock:
++            was_in = url in self._logged_in
++            self._logged_in.discard(url)
++            closing = self._closing
++        if closing:
++            return
++        state = "disconnected" if was_in else "error"
++        self.emit({"event": "hub", "state": state, "url": url, "detail": reason or None})
++
++    def _hub_error(self, url: str, detail: str) -> None:
++        self.emit({"event": "hub", "state": "error", "url": url, "detail": detail})
++
++    def _on_redirect(self, url: str, new_url: str) -> None:
++        self.emit({"event": "hub", "state": "redirect", "url": url, "detail": new_url})
++        # Follow it: leave the old hub and connect to the new address, off the core's thread.
++        threading.Thread(target=self._follow, args=(url, new_url), daemon=True).start()
++
++    def _follow(self, url: str, new_url: str) -> None:
++        try:
++            self.client.disconnect(url)
++        except Exception as e:  # noqa: BLE001
++            self.note(f"disconnect {url}: {e}")
++        with self._state_lock:
++            self._logged_in.discard(url)
++            if self.hub_url == url:
++                self.hub_url = new_url
++        self.client.connect(new_url)
++
++    def _on_chat(self, url: str, nick: str, text: str, third_person: bool) -> None:
++        if third_person:
++            text = f"/me {text}"
++        self.emit({"event": "chat", "from": nick or None, "text": text})
++
++    def _on_pm(self, url: str, from_nick: str, to_nick: str, text: str) -> None:
++        if from_nick == self.nick:
++            return  # our own PM, echoed back
++        self.emit({"event": "pm", "from": from_nick, "text": text})
++
++    def _on_result(self, url, file, size, free_slots, total_slots, tth, nick, is_dir) -> None:
++        if is_dir:
++            return
++        tth = tth if tth and tth != _ZERO_TTH else None
++        r = {"name": file, "size": int(size), "tth": tth, "from": nick, "hub": url}
++        with self._results_lock:
++            self._results.append(r)
++        self.emit({"event": "result", "name": file, "size": int(size), "tth": tth, "from": nick})
++
++    def _on_finished(self, target: str, size: int) -> None:
++        with self._state_lock:
++            name = self._pending.pop(target, None)
++        if name is None:
++            name = os.path.basename(target)
++        path = os.path.abspath(target)
++        # The core may still be moving the finished file into place.
++        for _ in range(50):
++            if os.path.isfile(path):
++                break
++            time.sleep(0.1)
++        try:
++            digest = _sha256(path)
++        except OSError as e:
++            self.error("download", f"{name} finished but {path} cannot be read: {e}")
++            return
++        self.emit({"event": "downloaded", "name": name, "path": path, "sha256": digest})
++
++    # -- commands ------------------------------------------------------------
++
++    def handle(self, line: str) -> bool:
++        """Run one command line; False when the driver should stop."""
++        try:
++            cmd = json.loads(line)
++        except json.JSONDecodeError as e:
++            self.error("", f"not JSON: {e}")
++            return True
++        if not isinstance(cmd, dict) or not isinstance(cmd.get("op"), str):
++            self.error("", 'a command is a JSON object with a string "op"')
++            return True
++        op = cmd["op"]
++        fn = getattr(self, "op_" + op, None)
++        if fn is None:
++            self.error(op, f"unknown op {op!r}")
++            return True
++        try:
++            return fn(cmd) is not False
++        except _CommandError as e:
++            self.error(op, str(e))
++        except Exception as e:  # noqa: BLE001
++            self.error(op, f"{type(e).__name__}: {e}")
++        return True
++
++    def _hub(self) -> str:
++        with self._state_lock:
++            url, ok = self.hub_url, self.hub_url in self._logged_in
++        if not url:
++            raise _CommandError("not connected to a hub (send connect first)")
++        if not ok:
++            raise _CommandError(f"not logged in to {url} yet")
++        return url
++
++    @staticmethod
++    def _str(cmd: dict, key: str) -> str:
++        v = cmd.get(key)
++        if not isinstance(v, str) or v == "":
++            raise _CommandError(f'"{key}" must be a non-empty string')
++        return v
++
++    def op_connect(self, cmd: dict) -> None:
++        url = self._str(cmd, "url")
++        with self._state_lock:
++            old = self.hub_url
++            self.hub_url = url
++            self._logged_in.discard(old)
++            self._logged_in.discard(url)
++        if old:
++            self.client.disconnect(old)  # no event for it: its listener goes first
++        self.client.connect(url)
++
++    def op_say(self, cmd: dict) -> None:
++        self.client.send_message(self._hub(), self._str(cmd, "text"))
++
++    def op_pm(self, cmd: dict) -> None:
++        url = self._hub()
++        to, text = self._str(cmd, "to"), self._str(cmd, "text")
++        if not any(u.nick == to for u in self.client.get_users(url)):
++            raise _CommandError(f"{to} is not on the hub")
++        self.client.send_pm(url, to, text)
++
++    def op_users(self, cmd: dict) -> None:
++        url = self._hub()
++        nicks = sorted(u.nick for u in self.client.get_users(url))
++        self.emit({"event": "users", "nicks": nicks})
++
++    def op_search(self, cmd: dict) -> None:
++        url = self._hub()
++        pattern = self._str(cmd, "pattern")
++        with self._results_lock:
++            self._results = []
++        self.client.clear_search_results()
++        if not self.client.search(pattern, hub_url=url):
++            raise _CommandError("the search was not sent")
++
++    def op_download(self, cmd: dict) -> None:
++        from eiskaltdcpp import dc_core
++
++        name, nick = self._str(cmd, "name"), self._str(cmd, "from")
++        with self._results_lock:
++            hits = [r for r in self._results if r["name"] == name and r["from"] == nick]
++        if not hits:
++            raise _CommandError(f"no result named {name!r} from {nick} in the latest search")
++        r = hits[-1]
++        if not r["tth"]:
++            raise _CommandError(f"{name!r} from {nick} has no TTH; only TTH downloads are supported")
++        user = self.client.clients.findUser(nick, r["hub"])
++        if not user:
++            raise _CommandError(f"{nick} is not on the hub")
++        target = os.path.join(os.path.abspath(self.args.download_dir), name)
++        with self._state_lock:
++            self._pending[target] = name
++        try:
++            self.client.queue.add(target, r["size"], dc_core.TTHValue(r["tth"]),
++                                  dc_core.HintedUser(user, r["hub"]))
++        except Exception as e:  # noqa: BLE001
++            with self._state_lock:
++                self._pending.pop(target, None)
++            raise _CommandError(f"cannot queue {name!r}: {e}") from e
++
++    def op_quit(self, cmd: dict) -> bool:
++        return False
++
++    # -- shutdown ------------------------------------------------------------
++
++    def stop(self) -> None:
++        with self._state_lock:
++            self._closing = True
++        c = self.client
++        if c is not None:
++            done = threading.Event()
++
++            def _down():
++                try:
++                    c.shutdown()
++                except Exception as e:  # noqa: BLE001
++                    self.note(f"shutdown: {e}")
++                done.set()
++
++            threading.Thread(target=_down, daemon=True).start()
++            if not done.wait(_SHUTDOWN_BUDGET):
++                self.note(f"the core did not shut down in {_SHUTDOWN_BUDGET:.0f} s; exiting anyway")
++        if self.cfg_dir:
++            shutil.rmtree(self.cfg_dir, ignore_errors=True)
++
++
++class _CommandError(Exception):
++    pass
++
++
++def _free_port() -> int:
++    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
++        s.bind(("", 0))
++        return s.getsockname()[1]
++
++
++def _share_bytes(root: str) -> int:
++    """Bytes the core will share from ``root``: regular, non-hidden files of non-zero size."""
++    total = 0
++    for d, dirs, files in os.walk(root):
++        dirs[:] = [x for x in dirs if not x.startswith(".")]
++        for f in files:
++            if f.startswith("."):
++                continue
++            p = os.path.join(d, f)
++            if os.path.isfile(p) and not os.path.islink(p):
++                total += os.path.getsize(p)
++    return total
++
++
++def _sha256(path: str) -> str:
++    h = hashlib.sha256()
++    with open(path, "rb") as f:
++        for chunk in iter(lambda: f.read(1 << 20), b""):
++            h.update(chunk)
++    return h.hexdigest()
++
++
++def _core_version() -> str:
++    """The EiskaltDC++ core's version, from the cvcpkg manifest in the prefix of the core library
++    this process loaded (or of this package, or of the interpreter)."""
++    import eiskaltdcpp
++
++    prefixes: list[Path] = []
++    try:
++        with open("/proc/self/maps") as f:
++            for line in f:
++                path = line.split()[-1]
++                if "/libeiskaltdcpp.so" in path:
++                    prefixes.append(Path(path).resolve().parent.parent)
++                    break
++    except OSError:
++        pass
++    prefixes += list(Path(eiskaltdcpp.__file__).resolve().parents)
++    prefixes += [Path(sys.prefix)]
++    for prefix in prefixes:
++        m = prefix / "share" / "libcvc-deps" / "eiskaltdcpp" / "manifest.yaml"
++        if not m.is_file():
++            continue
++        for line in m.read_text(errors="replace").splitlines():
++            s = line.strip()
++            if s.startswith("upstream_version:"):
++                v = s.split(":", 1)[1].strip().strip("'\"")
++                if v:
++                    return v
++    from eiskaltdcpp import dc_core
++
++    return dc_core.EisPyContext.getVersion()
++
++
++def _parse(argv: list[str] | None) -> argparse.Namespace:
++    p = argparse.ArgumentParser(prog="eiskaltdcpp-interop",
++                                description="One headless EiskaltDC++ client on stdin/stdout JSON lines.")
++    p.add_argument("--nick", required=True)
++    p.add_argument("--share", required=True, help="directory to share (hashed before ready)")
++    p.add_argument("--download-dir", required=True)
++    mode = p.add_mutually_exclusive_group()
++    mode.add_argument("--active", action="store_true")
++    mode.add_argument("--passive", action="store_true")
++    p.add_argument("--port", type=int, help="TCP and UDP port (active mode)")
++    p.add_argument("--ip", help="the address peers connect to (active mode)")
++    p.add_argument("--log", help="write the driver's and the core's diagnostics here")
++    p.add_argument("--version", action="version", version=f"eiskaltdcpp-interop contract {CONTRACT_VERSION}")
++    a = p.parse_args(argv)
++    if a.active and (not a.port or not a.ip):
++        p.error("--active needs --port and --ip")
++    if not a.active and (a.port or a.ip):
++        p.error("--port and --ip are for --active")
++    if not os.path.isdir(a.share):
++        p.error(f"--share {a.share}: not a directory")
++    return a
++
++
++def main(argv: list[str] | None = None) -> int:
++    args = _parse(argv)
++
++    # stdout carries only the contract's JSON lines: keep a private copy of it, then point fd 1
++    # (and fd 2 with --log) at the log so nothing the core prints can land in the stream.
++    out = os.fdopen(os.dup(1), "w", buffering=1, encoding="utf-8")
++    if args.log:
++        log = open(args.log, "a", buffering=1, encoding="utf-8")
++        os.dup2(log.fileno(), 1)
++        os.dup2(log.fileno(), 2)
++    else:
++        os.dup2(2, 1)
++        log = sys.stderr
++    sys.stdout = log
++
++    drv = Driver(args, out, log)
++    stop = threading.Event()
++    signal.signal(signal.SIGTERM, lambda *_: stop.set())
++
++    lines: list[str | None] = []
++    cond = threading.Condition()
++
++    def _reader():
++        for raw in sys.stdin:
++            with cond:
++                lines.append(raw)
++                cond.notify()
++        with cond:
++            lines.append(None)
++            cond.notify()
++
++    code = 0
++    try:
++        if drv.start():
++            threading.Thread(target=_reader, daemon=True).start()
++            while not stop.is_set():
++                with cond:
++                    while not lines and not stop.is_set():
++                        cond.wait(0.5)
++                    if not lines:
++                        continue
++                    raw = lines.pop(0)
++                if raw is None:
++                    break
++                if raw.strip() and not drv.handle(raw.strip()):
++                    break
++        else:
++            code = 1
++    except KeyboardInterrupt:
++        pass
++    finally:
++        drv.stop()
++        for f in (out, log):
++            try:
++                f.flush()
++            except Exception:  # noqa: BLE001
++                pass
++    # Skip interpreter teardown: the core's singletons are already shut down.
++    os._exit(code)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/swig/dcpp_types.i b/swig/dcpp_types.i
+index d059841..ce0ca2a 100644
+--- a/swig/dcpp_types.i
++++ b/swig/dcpp_types.i
+@@ -136,6 +136,13 @@ struct HashValue {
+ 
+ %template(TTHValue) dcpp::HashValue<dcpp::TigerHash>;
+ 
++// The managers' signatures say TTHValue; without the typedef SWIG treats it as an unrelated
++// opaque type, and no TTHValue made in Python matches them (QueueManager.add,
++// ShareManager.isTTHShared, ...).
++namespace dcpp {
++    typedef HashValue<TigerHash> TTHValue;
++}
++
+ %extend dcpp::HashValue<dcpp::TigerHash> {
+     std::string __str__() {
+         return $self->toBase32();

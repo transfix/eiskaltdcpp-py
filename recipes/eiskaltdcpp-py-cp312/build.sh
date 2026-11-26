@@ -68,6 +68,20 @@ mod="${site}/eiskaltdcpp"
 # The [api] server's dependencies are not packaged (recipe.yaml notes): drop its entry point.
 rm -f "${CVC_INSTALL_DIR}/bin/eiskaltdcpp-api"
 
+# eiskaltdcpp-interop: pip's entry point would run whichever python${PYVER} is first on PATH, so
+# replace it with a launcher that runs the prefix's own interpreter, isolated (-I) from the
+# caller's PYTHON* variables and user site. Its contract goes in the doc dir.
+cat > "${CVC_INSTALL_DIR}/bin/eiskaltdcpp-interop" <<EOF
+#!/bin/sh
+# eiskaltdcpp-interop (contract: share/doc/eiskaltdcpp-py-cp3${PYVER#3.}/eiskaltdcpp-interop.md)
+here=\$(dirname "\$(readlink -f "\$0")")
+exec "\$here/python${PYVER}" -I -m eiskaltdcpp.interop "\$@"
+EOF
+chmod 755 "${CVC_INSTALL_DIR}/bin/eiskaltdcpp-interop"
+doc="${CVC_INSTALL_DIR}/share/doc/eiskaltdcpp-py-cp3${PYVER#3.}"
+mkdir -p "${doc}"
+cp "${CVC_SOURCE_DIR}/docs/eiskaltdcpp-interop.md" "${doc}/eiskaltdcpp-interop.md"
+
 # The extension links libeiskaltdcpp from <prefix>/lib: make that $ORIGIN-relative.
 while IFS= read -r -d '' so; do
   rel="$("${PY_EXE}" -c 'import os,sys; print(os.path.relpath(sys.argv[1], sys.argv[2]))' \

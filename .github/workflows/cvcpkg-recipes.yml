@@ -4,7 +4,10 @@ name: cvcpkg recipes
 # cvcpkg-publish.yml does, and throws the result away. `cvcpkg pack` builds each one into its
 # prefix, runs recipes/<name>/test.sh on the staged tree (the module imports against the core, a
 # client starts it, a setting round-trips, the core shuts down), checks its globs, relocation and
-# glibc floor, and archives it. Nothing is published or uploaded.
+# glibc floor, and archives it. Nothing is published or uploaded. For cp312, the packed bundle is
+# then unpacked into the prefix and tests/interop/check_interop.py runs its bin/eiskaltdcpp-interop
+# against cy-pca/sublevels's NMDC hub (server/tools/run_hub.py from SUBLEVELS_REF, which needs
+# Python 3.12), run as a black box.
 #
 # ubuntu-22.04 with GCC 12: cvcpkg's linux bundles must start on glibc 2.35, so `cvcpkg pack`
 # refuses one built on a newer glibc (24.04 has 2.39).
@@ -21,12 +24,14 @@ on:
   pull_request:
     paths:
       - 'recipes/**'
+      - 'tests/interop/**'
       - '.github/workflows/cvcpkg-recipes.yml'
       - '.github/actions/setup-cvcpkg/**'
   push:
     branches: [master]
     paths:
       - 'recipes/**'
+      - 'tests/interop/**'
       - '.github/workflows/cvcpkg-recipes.yml'
       - '.github/actions/setup-cvcpkg/**'
   workflow_dispatch:
@@ -41,6 +46,8 @@ permissions:
 env:
   # transfix/eiskaltdcpp with recipes/eiskaltdcpp at 2.6.2 (transfix/eiskaltdcpp#7).
   EISKALTDCPP_RECIPE_REF: 3b8e2a297308716dc92899fbf69bcfc7cb62bb71
+  # The hub the interop check runs against (cy-pca/sublevels, public).
+  SUBLEVELS_REF: main
   CC: gcc-12
   CXX: g++-12
 
@@ -84,3 +91,26 @@ jobs:
             --prefix "$RUNNER_TEMP/prefix" --config release --link shared --output-dir dist
           ls -l dist/
           ls "dist/eiskaltdcpp-py-${{ matrix.abi }}-2.6.0+cvc."*-linux-x86_64-release-shared.tar.gz
+      - name: NMDC hub (cy-pca/sublevels)
+        if: matrix.abi == 'cp312'
+        uses: actions/checkout@v4
+        with:
+          repository: cy-pca/sublevels
+          ref: ${{ env.SUBLEVELS_REF }}
+          path: .sublevels
+          persist-credentials: false
+          sparse-checkout: |
+            server/tools
+            server/src
+      - name: eiskaltdcpp-interop against the hub (NMDC, NMDCS, redirect)
+        if: matrix.abi == 'cp312'
+        run: |
+          set -euo pipefail
+          prefix="$RUNNER_TEMP/prefix"
+          tar -xzf "dist/eiskaltdcpp-py-${{ matrix.abi }}-"*-linux-x86_64-release-shared.tar.gz -C "$prefix"
+          "$prefix/bin/python3.12" -I tests/interop/check_interop.py --hub-script .sublevels/server/tools/run_hub.py \
+            --driver "$prefix/bin/eiskaltdcpp-interop" --out "$RUNNER_TEMP/interop"
+      - name: Interop logs
+        if: failure() && matrix.abi == 'cp312'
+        run: |
+          for f in "$RUNNER_TEMP"/interop/*.log; do echo "::group::$f"; tail -n 200 "$f"; echo "::endgroup::"; done
