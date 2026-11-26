@@ -66,6 +66,7 @@ dev = [
 
 [project.scripts]
 eispy = "eiskaltdcpp.cli:main"
+eiskaltdcpp-interop = "eiskaltdcpp.interop:main"
 eiskaltdcpp-api = "eiskaltdcpp.api.__main__:main"
 
 [project.urls]

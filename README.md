@@ -580,6 +580,13 @@ eispy search -h
 eispy queue -h
 ```
 
+## eiskaltdcpp-interop
+
+`eiskaltdcpp-interop` runs one headless client behind a fixed JSON-lines contract on stdin and
+stdout (connect, chat, PMs, users, search, download, quit), so other projects' tests can use
+EiskaltDC++ as a black box. The contract is [docs/eiskaltdcpp-interop.md](docs/eiskaltdcpp-interop.md);
+`tests/interop/check_interop.py` checks it against an NMDC hub.
+
 ## REST API
 
 The project includes a full REST API server that can wrap a running DC client

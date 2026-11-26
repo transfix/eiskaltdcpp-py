@@ -136,6 +136,13 @@ struct HashValue {
 
 %template(TTHValue) dcpp::HashValue<dcpp::TigerHash>;
 
+// The managers' signatures say TTHValue; without the typedef SWIG treats it as an unrelated
+// opaque type, and no TTHValue made in Python matches them (QueueManager.add,
+// ShareManager.isTTHShared, ...).
+namespace dcpp {
+    typedef HashValue<TigerHash> TTHValue;
+}
+
 %extend dcpp::HashValue<dcpp::TigerHash> {
     std::string __str__() {
         return $self->toBase32();
