@@ -10,7 +10,8 @@ name: cvcpkg publish
 # give the person installing it. So the columns wait for the eiskaltdcpp version they pin to be
 # on cvcpkg.org (transfix/eiskaltdcpp's cvcpkg-publish.yml publishes it), and build against that
 # published bundle. After publishing, each column is installed from cvcpkg.org into an empty
-# prefix and its test.sh runs again there.
+# prefix and its test.sh runs again there; for cp312, tests/interop/check_interop.py also runs the
+# installed eiskaltdcpp-interop against cy-pca/sublevels's NMDC hub.
 #
 # The token is the CVCPKG_PUBLISHER_TOKEN repository secret: a cvcpkg.org publisher that is a
 # member of the cy-pca organisation. Only the publish steps see it. Without it a job builds,
@@ -80,3 +81,26 @@ jobs:
           cvcpkg install "eiskaltdcpp-py-${{ matrix.abi }}" --prefix "$check" --config release --link shared \
             --no-fallback-to-source
           CVC_INSTALL_DIR="$check" CVC_DEPS_PREFIX="$check" bash "recipes/eiskaltdcpp-py-${{ matrix.abi }}/test.sh"
+      - name: NMDC hub (cy-pca/sublevels)
+        if: matrix.abi == 'cp312'
+        uses: actions/checkout@v4
+        with:
+          repository: cy-pca/sublevels
+          ref: main
+          path: .sublevels
+          persist-credentials: false
+          sparse-checkout: |
+            server/tools
+            server/src
+      # The installed eiskaltdcpp-interop against cy-pca/sublevels's hub (it needs Python 3.12).
+      - name: eiskaltdcpp-interop from cvcpkg.org against the hub
+        if: matrix.abi == 'cp312'
+        run: |
+          set -euo pipefail
+          check="$RUNNER_TEMP/check"
+          "$check/bin/python3.12" -I tests/interop/check_interop.py --hub-script .sublevels/server/tools/run_hub.py \
+            --driver "$check/bin/eiskaltdcpp-interop" --out "$RUNNER_TEMP/interop"
+      - name: Interop logs
+        if: failure() && matrix.abi == 'cp312'
+        run: |
+          for f in "$RUNNER_TEMP"/interop/*.log; do echo "::group::$f"; tail -n 200 "$f"; echo "::endgroup::"; done

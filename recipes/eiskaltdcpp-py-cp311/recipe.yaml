@@ -2,7 +2,7 @@ schema_version: 1
 recipe:
   name: eiskaltdcpp-py-cp311
   upstream_version: "2.6.0"
-  cvc_revision: 2
+  cvc_revision: 3
   maintainer: "cy-pca"
   maintainer_url: "https://github.com/transfix/eiskaltdcpp-py"
   homepage: https://github.com/transfix/eiskaltdcpp-py
@@ -10,7 +10,9 @@ recipe:
   tags: [python, networking, p2p, direct-connect]
   description: >-
     eiskaltdcpp-py 2.6.0 for CPython 3.11 (cp311): the SWIG bindings for libeiskaltdcpp (the
-    transfix fork), importable as `eiskaltdcpp`, with the `eispy` command. Built from source
+    transfix fork), importable as `eiskaltdcpp`, with the `eispy` command and
+    `eiskaltdcpp-interop`, a headless client driven by JSON lines on stdin and stdout for interop
+    tests (its contract: share/doc/eiskaltdcpp-py-cp311/eiskaltdcpp-interop.md). Built from source
     against cvcpkg's eiskaltdcpp, which it loads from the same prefix (no vendored copy of the
     core). The optional FastAPI server (`eiskaltdcpp-api`, the [api] extra) is not wired up.
 
@@ -19,6 +21,11 @@ recipe:
 # bindings build against cvcpkg's eiskaltdcpp 2.6.2 (transfix/eiskaltdcpp v2.6.2: the v2.6.0 core
 # this release pins, plus the daemon stop fix and build fixes; the library's ABI is unchanged), not
 # a copy of their own. master is the same code plus README and CI changes.
+#
+# patches/0001 is master's eiskaltdcpp-interop commit (transfix/eiskaltdcpp-py#17), limited to what
+# the package ships: python/eiskaltdcpp/interop.py, its entry point, docs/eiskaltdcpp-interop.md,
+# and the SWIG typedef the driver needs to queue downloads by hash. The next tag includes it;
+# then pin that tag and drop the patch.
 source:
   type: tarball
   url: https://github.com/transfix/eiskaltdcpp-py/archive/b7ec07c96b3ec8136a54d69a16159794f22fdbeb.tar.gz
@@ -29,7 +36,8 @@ python:
   interpreter: python311
   abi: cp311
 
-patches: []
+patches:
+  - patches/0001-eiskaltdcpp-interop.patch
 
 depends:
   build:
@@ -63,6 +71,8 @@ package:
     - lib/python3.11/site-packages/eiskaltdcpp/
     - lib/python3.11/site-packages/eiskaltdcpp_py-2.6.0.0.dist-info/
     - bin/eispy
+    - bin/eiskaltdcpp-interop
+    - share/doc/eiskaltdcpp-py-cp311/eiskaltdcpp-interop.md
 
 test:
   script: test.sh
@@ -82,3 +92,10 @@ notes:
       eiskaltdcpp-api needs fastapi, uvicorn, pydantic, bcrypt and python-jose; python-jose has
       no cvcpkg column yet, so the server's dependencies are not declared and bin/eiskaltdcpp-api
       is removed from the bundle. The `eiskaltdcpp` module and `eispy` work without them.
+  - title: "eiskaltdcpp-interop"
+    description: >-
+      bin/eiskaltdcpp-interop is a launcher for this prefix's own interpreter (pip's entry point
+      would take whichever python on PATH), so it runs without activating the prefix. The
+      contract it implements, its version and its limits are in
+      share/doc/eiskaltdcpp-py-cp311/eiskaltdcpp-interop.md. test.sh starts it, checks the ready
+      event and an exit 0 on quit; CI runs tests/interop/check_interop.py against an NMDC hub.
